@@ -159,3 +159,87 @@ button { font: inherit; color: inherit; cursor: pointer; border: 0; background: 
   .maplibregl-ctrl-bottom-right { right: 0; }
 }
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+
+/* ---------- Pestañas y planificador ---------- */
+.tabs { margin-top: 0; margin-bottom: 12px; }
+.fab.txt { font-size: 13px; font-weight: 800; letter-spacing: -0.02em; }
+.fab.txt[aria-pressed='true'] { color: var(--accent); }
+
+.plan { display: flex; align-items: center; gap: 8px; background: var(--chip); border-radius: 14px; padding: 6px 8px 6px 12px; }
+.plan .rail { display: flex; flex-direction: column; align-items: center; gap: 3px; width: 14px; flex: none; color: #ff453a; }
+.plan .rail .o { width: 10px; height: 10px; border-radius: 50%; border: 3px solid var(--accent); background: var(--solid); }
+.plan .rail .l { width: 2px; height: 14px; background: repeating-linear-gradient(var(--fg2) 0 2px, transparent 2px 5px); opacity: 0.5; }
+.plan .rail .d { display: grid; }
+.plan .rail .d svg { width: 15px; height: 15px; }
+.plan .fields { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.plan input { width: 100%; height: 34px; border: 0; outline: 0; background: none; font: inherit; font-size: 16px; color: var(--fg); }
+.plan input + input { border-top: 0.5px solid var(--sep); }
+.plan input::placeholder { color: var(--fg2); }
+.plan .iconbtn { background: var(--solid); }
+
+.sico { width: 32px; height: 32px; border-radius: 50%; background: var(--chip); display: grid; place-items: center; flex: none; color: var(--fg2); }
+.sico.loc { background: var(--accent); color: #fff; }
+.sico.walk { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); }
+.sico.dest { background: #ff453a; color: #fff; }
+.sico svg { display: block; }
+
+.empty.small { padding: 14px 20px; font-size: 13px; }
+.empty.hello { padding: 36px 24px; }
+.empty.hello b { display: block; font-size: 18px; color: var(--fg); margin-bottom: 6px; }
+.empty.hello p { margin: 0 0 16px; line-height: 1.45; }
+.hello-ico { width: 56px; height: 56px; border-radius: 17px; margin: 0 auto 14px; display: grid; place-items: center; color: #fff; background: linear-gradient(145deg, #3aa0ff, #0066e0); box-shadow: 0 6px 18px rgba(0, 110, 240, 0.35); }
+.btn { display: inline-flex; align-items: center; gap: 7px; margin-top: 12px; padding: 9px 16px; border-radius: 12px; background: var(--accent); color: #fff; font-weight: 600; font-size: 14px; }
+.btn:active { opacity: 0.8; }
+.spin { width: 22px; height: 22px; border-radius: 50%; border: 3px solid var(--chip-hover); border-top-color: var(--accent); margin: 0 auto 12px; animation: spin 0.8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.chips-row { display: flex; gap: 6px; padding: 4px 8px 8px; overflow-x: auto; scrollbar-width: none; }
+.chip { flex: none; padding: 6px 12px; border-radius: 999px; background: var(--chip); font-size: 13px; font-weight: 600; color: var(--fg2); }
+.chip[aria-pressed='true'] { background: var(--accent); color: #fff; }
+
+.trip { display: block; width: calc(100% - 8px); margin: 0 4px 6px; text-align: left; padding: 12px 14px; border-radius: 16px; background: var(--chip); transition: background 0.12s; }
+.trip:hover { background: var(--chip-hover); }
+.trip .tt { display: flex; align-items: baseline; gap: 8px; }
+.trip .tt b { font-size: 21px; letter-spacing: -0.02em; }
+.trip .tt em { font-style: normal; font-size: 11px; font-weight: 700; color: var(--live); background: color-mix(in srgb, var(--live) 16%, transparent); padding: 2px 7px; border-radius: 6px; }
+.trip .tt span { margin-left: auto; font-size: 13px; color: var(--fg2); font-variant-numeric: tabular-nums; }
+.trip .legs { display: flex; align-items: center; flex-wrap: wrap; gap: 5px; margin: 9px 0 7px; }
+.trip .legs .arrow { color: var(--fg2); opacity: 0.6; font-size: 14px; }
+.wk { display: inline-flex; align-items: center; gap: 3px; font-size: 12.5px; font-weight: 600; color: var(--fg2); padding: 3px 7px; border-radius: 8px; background: var(--solid); }
+.badge.sm { min-width: 38px; height: 24px; font-size: 12.5px; border-radius: 8px; padding: 0 7px; }
+.trip .ts { font-size: 12.5px; color: var(--fg2); }
+.note.pad { padding: 10px 14px; }
+
+.card.sum { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 10px; padding: 12px 14px; }
+.card.sum b { font-size: 24px; letter-spacing: -0.02em; }
+.card.sum span { color: var(--fg2); font-size: 13.5px; }
+.card.sum .s { flex-basis: 100%; font-size: 12.5px; color: var(--fg2); }
+.row.back { margin: 0 4px 2px; width: calc(100% - 8px); padding: 4px 6px; }
+.row.back .iconbtn { width: 28px; height: 28px; }
+
+.steps { padding: 4px 4px 0; }
+.step { display: flex; align-items: flex-start; gap: 12px; width: 100%; text-align: left; padding: 10px; border-radius: 14px; position: relative; }
+.step:hover { background: var(--chip); }
+.step .main { flex: 1; min-width: 0; }
+.step .t { font-size: 14.5px; font-weight: 650; }
+.step .t .mut { color: var(--fg2); font-weight: 500; }
+.step .s { font-size: 13px; color: var(--fg2); margin-top: 2px; line-height: 1.4; }
+.step .s b { color: var(--fg); font-weight: 600; }
+.step .hr { font-size: 12.5px; color: var(--fg2); font-variant-numeric: tabular-nums; padding-top: 2px; }
+.step .eta { margin-top: 6px; font-size: 12.5px; line-height: 1.7; }
+.step .badge { margin-top: 1px; }
+
+/* ---------- Frecuencia en parada ---------- */
+.freq { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 6px; margin: 4px 0 4px; }
+.freq > div { background: var(--solid); border-radius: 12px; padding: 8px 10px; }
+.freq small { display: block; font-size: 11px; color: var(--fg2); font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; }
+.freq b { display: block; font-size: 15px; margin-top: 2px; letter-spacing: -0.01em; }
+.note.flat { padding: 2px 2px 8px; line-height: 1.4; }
+.arr .nm { display: flex; flex-direction: column; min-width: 0; }
+.arr .fq { font-size: 11.5px; color: var(--fg2); margin-top: 1px; }
+
+/* ---------- Marcadores ---------- */
+.bus-tag b { display: block; font-size: 11px; font-weight: 800; color: #fff; background: var(--c); padding: 2px 7px; border-radius: 8px; border: 2px solid #fff; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35); letter-spacing: -0.02em; }
+.bus-tag.est b { opacity: 0.94; }
+.me-dot.o { width: 14px; height: 14px; background: var(--solid); border: 4px solid #0a84ff; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35); }
+.dest-pin { color: #ff453a; filter: drop-shadow(0 3px 5px rgba(0, 0, 0, 0.4)); line-height: 0; }

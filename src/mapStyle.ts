@@ -58,7 +58,7 @@ const WIDTH: Record<string, Stops> = {
   service: [[15, 0.5], [16, 2], [18, 6], [20, 14]],
 };
 
-export function buildStyle(theme: Theme): StyleSpecification {
+export function buildStyle(theme: Theme, threeD = true): StyleSpecification {
   const p = PALETTE[theme];
   const L: LayerSpecification[] = [];
   const add = (l: LayerSpecification) => L.push(l);
@@ -103,7 +103,7 @@ export function buildStyle(theme: Theme): StyleSpecification {
     paint: { 'fill-color': p.industrial },
   });
   add({
-    id: 'building', type: 'fill', source: 'om', 'source-layer': 'building', minzoom: 14.5,
+    id: 'building', type: 'fill', source: 'om', 'source-layer': 'building', minzoom: 14.5, ...(threeD ? { maxzoom: 15.4 } : {}),
     paint: {
       'fill-color': p.building,
       'fill-outline-color': p.buildingEdge,
@@ -150,6 +150,21 @@ export function buildStyle(theme: Theme): StyleSpecification {
       filter: ['all', notTunnel, cls(...classes)],
       layout: { 'line-cap': 'round', 'line-join': 'round' },
       paint: { 'line-color': fill, 'line-width': interp(w) },
+    });
+  }
+
+  // Edificios en 3D: sólo cerca del suelo (zoom alto) para que el costo de GPU sea mínimo
+  if (threeD) {
+    add({
+      id: 'building-3d', type: 'fill-extrusion', source: 'om', 'source-layer': 'building', minzoom: 15.4,
+      filter: ['>', ['coalesce', ['get', 'render_height'], 0], 0],
+      paint: {
+        'fill-extrusion-color': theme === 'dark' ? '#2e3038' : '#f1ede5',
+        'fill-extrusion-height': ['min', ['coalesce', ['get', 'render_height'], 6], 80],
+        'fill-extrusion-base': ['coalesce', ['get', 'render_min_height'], 0],
+        'fill-extrusion-opacity': ['interpolate', ['linear'], ['zoom'], 15.4, 0, 16.2, 0.88],
+        'fill-extrusion-vertical-gradient': true,
+      },
     });
   }
 

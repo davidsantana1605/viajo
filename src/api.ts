@@ -28,10 +28,17 @@ export async function loadLinea(file: string): Promise<Linea> {
 
 export async function arribos(parada: string, linea?: string): Promise<ArriboLinea[]> {
   const q = `?parada=${encodeURIComponent(parada)}${linea ? `&linea=${encodeURIComponent(linea)}` : ''}`;
-  const r = await fetch(`${API}/cuandollega${q}`);
-  if (!r.ok) throw new Error('cuandollega ' + r.status);
-  const d = await r.json();
-  return Array.isArray(d) ? d : [];
+  // El servicio municipal devuelve 500 de forma intermitente: se reintenta un par de veces.
+  let err: unknown;
+  for (let i = 0; i < 3; i++) {
+    try {
+      const r = await fetch(`${API}/cuandollega${q}`);
+      if (r.ok) { const d = await r.json(); return Array.isArray(d) ? d : []; }
+      err = new Error('cuandollega ' + r.status);
+    } catch (e) { err = e; }
+    await new Promise((res) => setTimeout(res, 350 * (i + 1)));
+  }
+  throw err;
 }
 
 /** Un arribo trae posición real sólo si no es "Programado" y tiene coordenadas válidas. */
