@@ -14,6 +14,7 @@ import { planificar, type Ruta } from './trip';
 import { estimate, dedupe, headingNear, busFeatures, dist, type Est } from './bus3d';
 import { renderRutinas, iniciarUbicacionPeriodica } from './rutinas';
 import { registrarSW } from './push';
+import { initPWA, estaOffline } from './pwa'; // [pwa]
 
 /* ------------------------------------------------------------------ utilidades */
 const $ = <T extends HTMLElement>(s: string) => document.querySelector(s) as T;
@@ -977,7 +978,9 @@ function frecuenciaResumen(x: ArriboLinea | undefined): string {
 function stopCard(): string {
   if (!parada) return '';
   let body: string;
-  if (paradaError) body = `<div class="note">No se pudieron cargar los arribos. Reintentando…</div>`;
+  if (paradaError) body = estaOffline() // [pwa]
+    ? `<div class="note">Sin conexión · los arribos en vivo no están disponibles. Se retoman solos cuando vuelva internet.</div>`
+    : `<div class="note">No se pudieron cargar los arribos. Reintentando…</div>`;
   else if (!paradaData) body = `<div class="note">Consultando arribos…</div>`;
   else if (!paradaData.length) body = `<div class="note">No hay arribos informados para esta parada.</div>`;
   else {
@@ -1131,8 +1134,10 @@ setInterval(() => {
   index = await loadIndex();
   setSnap('half');
   if (location.hash === '#rutinas') tab = 'rutinas'; // viene de tocar una notificación
+  else if (location.hash === '#lineas') tab = 'lineas'; // [pwa] atajos del manifest (#viaje es la pestaña por defecto)
   renderHome();
   registrarSW();
+  initPWA(); // [pwa]
   iniciarUbicacionPeriodica();
   const m = location.hash.match(/linea=([\w-]+)/);
   if (m && index.some((i) => i.file === m[1])) openLinea(m[1]);
