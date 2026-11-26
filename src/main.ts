@@ -17,7 +17,7 @@ import { registrarSW } from './push';
 
 /* ------------------------------------------------------------------ utilidades */
 const $ = <T extends HTMLElement>(s: string) => document.querySelector(s) as T;
-const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
+const esc = (s: unknown) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
 const norm = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
 const isMobile = () => matchMedia('(max-width: 760px)').matches;
 type LL = [number, number];
@@ -356,7 +356,7 @@ function drawRows() {
   let html = '', cur = '';
   for (const l of rows) {
     if (l.empresa !== cur) { cur = l.empresa; html += `<div class="sec">${esc(empresaNombre(cur))}</div>`; }
-    html += `<button class="row" data-f="${l.file}">${badge(l)}<span class="main"><div class="t">${esc(l.nombre)}</div><div class="s">${varianteDot(l.variante)}${VARIANTE[l.variante] ? ' · ' : ''}${l.paradas} paradas</div></span><span class="chev">${ICON.chev}</span></button>`;
+    html += `<button class="row" data-f="${esc(l.file)}">${badge(l)}<span class="main"><div class="t">${esc(l.nombre)}</div><div class="s">${varianteDot(l.variante)}${VARIANTE[l.variante] ? ' · ' : ''}${l.paradas} paradas</div></span><span class="chev">${ICON.chev}</span></button>`;
   }
   content.innerHTML = html;
   content.scrollTop = 0;
@@ -589,7 +589,7 @@ async function selectRuta(r: Ruta) {
         const a = list[0];
         const live = a.tipo.toLowerCase() !== 'programado';
         const f = frecuencia(list);
-        tripEta.set(i, `${live ? '<span class="pill live">en vivo</span>' : '<span class="pill prog">programado</span>'} Próximo: <b>${a.arriboEnMinutos < 60 ? fmtMin(a.arriboEnMinutos) : a.horaArribo}</b>${list[1] ? ` · luego ${list[1].arriboEnMinutos < 60 ? fmtMin(list[1].arriboEnMinutos) : list[1].horaArribo}` : ''}${f ? `<br>Pasa cada ~${f} min` : ''}`);
+        tripEta.set(i, `${live ? '<span class="pill live">en vivo</span>' : '<span class="pill prog">programado</span>'} Próximo: <b>${a.arriboEnMinutos < 60 ? fmtMin(a.arriboEnMinutos) : esc(a.horaArribo)}</b>${list[1] ? ` · luego ${list[1].arriboEnMinutos < 60 ? fmtMin(list[1].arriboEnMinutos) : esc(list[1].horaArribo)}` : ''}${f ? `<br>Pasa cada ~${f} min` : ''}`);
       } else tripEta.set(i, '<span class="pill prog">sin arribos informados</span>');
       if (l) {
         const routes = [l.ida.flat(), l.vuelta.flat()] as LL[][];
@@ -941,7 +941,7 @@ function drawLive() {
 
 const fmtArribo = (a: Arribo) => {
   const live = esEnVivo(a) || a.tipo.toLowerCase() !== 'programado';
-  const t = a.arriboEnMinutos <= 0 ? 'Ahora' : a.arriboEnMinutos < 60 ? `${a.arriboEnMinutos} min` : a.horaArribo;
+  const t = a.arriboEnMinutos <= 0 ? 'Ahora' : a.arriboEnMinutos < 60 ? `${Number(a.arriboEnMinutos)} min` : esc(a.horaArribo);
   return live ? `<span class="pill live">${t}</span>` : `<span class="pill prog" title="Horario programado">${t}</span>`;
 };
 
@@ -988,7 +988,7 @@ function stopCard(): string {
       const bd = badge({ codigo: x.linea.codigoEMR || x.linea.nombreCorto });
       const times = x.arribos.slice(0, 3).map(fmtArribo).join('') || '<span class="pill prog">—</span>';
       const f = frecuencia(x.arribos);
-      return `<div class="arr ${mine(x) ? 'me' : ''}">${idx && !mine(x) ? `<button class="badge-btn" data-f="${idx.file}" style="display:contents">${bd}</button>` : bd}<span class="nm"><span style="font-size:13px;font-weight:${mine(x) ? 650 : 500}">${esc(x.linea.nombre)}</span>${f ? `<small class="fq">cada ~${f} min</small>` : ''}</span><span class="times">${times}</span></div>`;
+      return `<div class="arr ${mine(x) ? 'me' : ''}">${idx && !mine(x) ? `<button class="badge-btn" data-f="${esc(idx.file)}" style="display:contents">${bd}</button>` : bd}<span class="nm"><span style="font-size:13px;font-weight:${mine(x) ? 650 : 500}">${esc(x.linea.nombre)}</span>${f ? `<small class="fq">cada ~${f} min</small>` : ''}</span><span class="times">${times}</span></div>`;
     }).join('') + `<div class="note"><span class="pill live" style="font-size:11px;padding:1px 6px">en vivo</span> con GPS · <span class="pill prog" style="font-size:11px;padding:1px 6px">hora</span> programado</div>`;
   }
   return `<div class="card">
@@ -999,7 +999,7 @@ function stopCard(): string {
 function drawBody() {
   if (!linea) return;
   const c = lineColor(linea.codigo, theme);
-  const list = linea.stops.map((p) => `<button class="stop ${parada?.id === p.id ? 'sel' : ''}" data-s="${p.id}" style="--c:${c}"><span class="pin"></span><span><div class="n">${esc(p.nombre)}</div>${p.desc ? `<div class="d">${esc(p.desc)}</div>` : ''}</span></button>`).join('');
+  const list = linea.stops.map((p) => `<button class="stop ${parada?.id === p.id ? 'sel' : ''}" data-s="${esc(p.id)}" style="--c:${c}"><span class="pin"></span><span><div class="n">${esc(p.nombre)}</div>${p.desc ? `<div class="d">${esc(p.desc)}</div>` : ''}</span></button>`).join('');
   content.innerHTML = `${stopCard()}<div class="sec">Paradas</div>${list}`;
   content.querySelectorAll<HTMLButtonElement>('.stop').forEach((b) => (b.onclick = () => { const p = linea!.stops.find((s) => s.id === b.dataset.s); if (p) selectStop(p, true); }));
   content.querySelectorAll<HTMLElement>('[data-f]').forEach((b) => (b.onclick = () => openLinea(b.dataset.f!)));

@@ -8,12 +8,37 @@ export interface Ctx {
   content: HTMLElement;
   isMobile: () => boolean;
   setFull: () => void;
-  esc: (s: string) => string;
+  esc: (s: unknown) => string;
 }
 
 const LS_R = 'viajo-rutinas', LS_U = 'viajo-usuario';
-let rutinas: Rutina[] = JSON.parse(localStorage.getItem(LS_R) ?? '[]');
-let usuario = localStorage.getItem(LS_U) ?? '';
+/** Lee las rutinas de localStorage validando forma y tipos (el contenido no es de fiar: puede estar manipulado). */
+function cargarRutinas(): Rutina[] {
+  try {
+    const v = JSON.parse(localStorage.getItem(LS_R) ?? '[]');
+    if (!Array.isArray(v)) return [];
+    const txt = (x: unknown, max: number) => (typeof x === 'string' ? x.slice(0, max) : '');
+    const lugar = (x: unknown) => {
+      const o = (x ?? {}) as Record<string, unknown>;
+      const lng = Number(o.lng), lat = Number(o.lat);
+      return Number.isFinite(lng) && Number.isFinite(lat) && Math.abs(lng) <= 180 && Math.abs(lat) <= 90 ? { nombre: txt(o.nombre, 120) || 'Lugar', lng, lat } : null;
+    };
+    const out: Rutina[] = [];
+    for (const x of v.slice(0, 50)) {
+      const o = (x ?? {}) as Record<string, unknown>;
+      const destino = lugar(o.destino), origen = lugar(o.origen);
+      const llegada = txt(o.llegada, 5);
+      if (!destino || !origen || !/^([01]\d|2[0-3]):[0-5]\d$/.test(llegada)) continue;
+      const id = txt(o.id, 60).replace(/[^\w-]/g, '') || String(Date.now()) + out.length;
+      const dias = Array.isArray(o.dias) ? [...new Set((o.dias as unknown[]).filter((d): d is number => Number.isInteger(d) && (d as number) >= 0 && (d as number) <= 6))] : [];
+      const margen = Number(o.margen);
+      out.push({ id, nombre: txt(o.nombre, 60) || 'Rutina', destino, origen, usarUbicacion: o.usarUbicacion === true, dias, llegada, margen: Number.isFinite(margen) && margen >= 0 && margen <= 60 ? margen : 10, activa: o.activa !== false });
+    }
+    return out;
+  } catch { return []; }
+}
+let rutinas: Rutina[] = cargarRutinas();
+let usuario = (localStorage.getItem(LS_U) ?? '').slice(0, 40);
 let vista: 'lista' | 'form' = 'lista';
 let editando: Rutina | null = null;
 let ctx: Ctx;
@@ -41,8 +66,8 @@ function drawLista() {
   const { esc } = ctx;
   const cards = rutinas.map((r) => {
     const dias = r.dias.length === 7 ? 'Todos los días' : r.dias.length === 5 && !r.dias.includes(0) && !r.dias.includes(6) ? 'Lunes a viernes' : [...r.dias].sort().map((d) => DIAS[d]).join(' · ') || 'Sin días';
-    return `<div class="rcard ${r.activa ? '' : 'off'}" data-id="${r.id}">
-      <div class="rtop"><div class="rinfo"><b>${esc(r.nombre)}</b><span>${dias} · llegar a las <b>${r.llegada}</b></span><span>a ${esc(r.destino.nombre)}</span></div>
+    return `<div class="rcard ${r.activa ? '' : 'off'}" data-id="${esc(r.id)}">
+      <div class="rtop"><div class="rinfo"><b>${esc(r.nombre)}</b><span>${dias} · llegar a las <b>${esc(r.llegada)}</b></span><span>a ${esc(r.destino.nombre)}</span></div>
         <label class="switch" title="Activar o pausar"><input type="checkbox" data-act ${r.activa ? 'checked' : ''}><i></i></label></div>
       <div class="ract"><button class="chip" data-prev>Ver recomendación</button><button class="chip" data-edit>Editar</button><button class="chip del" data-del>Borrar</button></div>
       <div class="rprev" hidden></div>
