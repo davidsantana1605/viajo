@@ -23,6 +23,7 @@ import { initShare, aplicarHash, shareBtns, syncLinea, syncViaje, syncTab, leave
 import type { Pt } from './links'; // [share]
 
 import { toast, vibrar } from './toast';
+import { initColores } from './colores';
 
 /* ------------------------------------------------------------------ utilidades */
 const $ = <T extends HTMLElement>(s: string) => document.querySelector(s) as T;
@@ -304,6 +305,7 @@ btn3d.onclick = () => {
   map.easeTo({ pitch: threeD ? 38 : 0, duration: 600 });
 };
 paintButtons();
+initColores();
 
 let meMarker: maplibregl.Marker | null = null;
 function setMe(ll: LL) {
