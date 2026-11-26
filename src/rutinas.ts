@@ -1,5 +1,6 @@
 // Pestaña "Rutinas": viajes que repetís (destino, días, hora de llegada) con avisos push.
 import { buscarLugares, type Lugar } from './geo';
+import { montarChips, conGuardados } from './lugares'; // [lugares]
 import { planificar } from './trip';
 import { DIAS, DIAS_L, hm, mensaje, momentos, proximaLlegada, recomendar, type Aviso, type Rutina } from './recomendar';
 import { activarPush, desactivarPush, enviarPrueba, enviarUbicacion, estadoPush, servidorConfigurado, sincronizar, type EstadoPush } from './push';
@@ -135,7 +136,7 @@ function autocompletar(input: HTMLInputElement, lista: HTMLElement, alElegir: (l
     t = window.setTimeout(async () => {
       ac?.abort(); ac = new AbortController();
       try {
-        const items = await buscarLugares(q, ac.signal);
+        const items = conGuardados(q, await buscarLugares(q, ac.signal)); // [lugares]
         lista.innerHTML = items.map((l, i) => `<button type="button" class="row sug" data-i="${i}"><span class="main"><div class="t">${ctx.esc(l.nombre)}</div><div class="s">${ctx.esc(l.detalle)}</div></span></button>`).join('') || '<div class="empty small">Sin resultados.</div>';
         lista.querySelectorAll<HTMLElement>('[data-i]').forEach((b) => (b.onpointerdown = (e) => { e.preventDefault(); const l = items[+b.dataset.i!]; input.value = l.nombre; lista.innerHTML = ''; alElegir(l); }));
       } catch { /* cancelado */ }
@@ -153,7 +154,9 @@ function drawForm() {
     <form class="rform" id="rform" autocomplete="off">
       <label class="fld"><span>Nombre</span><input id="f-nombre" required maxlength="60" placeholder="Ej.: Trabajo, Facultad" value="${esc(r?.nombre ?? '')}"></label>
       <label class="fld"><span>¿A dónde vas?</span><input id="f-dest" required placeholder="Dirección, esquina o lugar" value="${esc(r?.destino.nombre ?? '')}"><div class="aclist" id="l-dest"></div></label>
+      <div id="lg-dest"></div>
       <label class="fld"><span>¿Desde dónde salís? (casa u origen fijo)</span><input id="f-orig" required placeholder="Tu dirección" value="${esc(r?.origen.nombre ?? '')}"><div class="aclist" id="l-orig"></div></label>
+      <div id="lg-orig"></div>
       <label class="chk"><input type="checkbox" id="f-ubic" ${r?.usarUbicacion ? 'checked' : ''}><span>Usar mi ubicación actual cuando la app la conozca (si no, uso el origen de arriba)</span></label>
       <div class="fld"><span>Días de la semana</span><div class="dchips">${[1, 2, 3, 4, 5, 6, 0].map((d) => `<button type="button" class="dchip" data-d="${d}" aria-pressed="${dias.has(d)}" title="${DIAS[d]}">${DIAS_L[d]}</button>`).join('')}</div></div>
       <div class="two">
@@ -168,6 +171,9 @@ function drawForm() {
   $f('cancelar').onclick = () => { vista = 'lista'; drawLista(); estadoPush().then((e) => { push = e; pintarPush(); }); };
   autocompletar($f<HTMLInputElement>('f-dest'), $f('l-dest'), (l) => (destino = { nombre: l.nombre, lng: l.lng, lat: l.lat }));
   autocompletar($f<HTMLInputElement>('f-orig'), $f('l-orig'), (l) => (origen = { nombre: l.nombre, lng: l.lng, lat: l.lat }));
+  // [lugares] chips de Casa / Trabajo / favoritos como destino u origen
+  montarChips($f('lg-dest'), { alElegir: (l) => { $f<HTMLInputElement>('f-dest').value = l.nombre; $f('l-dest').innerHTML = ''; destino = { nombre: l.nombre, lng: l.lng, lat: l.lat }; } });
+  montarChips($f('lg-orig'), { alElegir: (l) => { $f<HTMLInputElement>('f-orig').value = l.nombre; $f('l-orig').innerHTML = ''; origen = { nombre: l.nombre, lng: l.lng, lat: l.lat }; } });
   // si cambia el texto a mano, el lugar elegido deja de valer
   $f<HTMLInputElement>('f-dest').addEventListener('input', () => { if (destino && $f<HTMLInputElement>('f-dest').value !== destino.nombre) destino = null; });
   $f<HTMLInputElement>('f-orig').addEventListener('input', () => { if (origen && $f<HTMLInputElement>('f-orig').value !== origen.nombre) origen = null; });
