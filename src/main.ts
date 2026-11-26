@@ -13,6 +13,7 @@ import { buscarLugares, type Lugar } from './geo';
 import { planificar, type Ruta } from './trip';
 import { estimate, dedupe, headingNear, busFeatures, dist, type Est } from './bus3d';
 import { norm, fmtDur, fmtDist, fmtMin, frecuencia } from './util';
+import { initPWA, estaOffline } from './pwa'; // [pwa]
 
 /* ------------------------------------------------------------------ utilidades */
 const $ = <T extends HTMLElement>(s: string) => document.querySelector(s) as T;
@@ -966,7 +967,9 @@ function frecuenciaResumen(x: ArriboLinea | undefined): string {
 function stopCard(): string {
   if (!parada) return '';
   let body: string;
-  if (paradaError) body = `<div class="note">No se pudieron cargar los arribos. Reintentando…</div>`;
+  if (paradaError) body = estaOffline() // [pwa]
+    ? `<div class="note">Sin conexión · los arribos en vivo no están disponibles. Se retoman solos cuando vuelva internet.</div>`
+    : `<div class="note">No se pudieron cargar los arribos. Reintentando…</div>`;
   else if (!paradaData) body = `<div class="note">Consultando arribos…</div>`;
   else if (!paradaData.length) body = `<div class="note">No hay arribos informados para esta parada.</div>`;
   else {
@@ -1138,6 +1141,7 @@ setInterval(() => { if (!document.hidden && !tickRaf) tickRaf = requestAnimation
   index = await loadIndex();
   setSnap('half');
   if (location.hash === '#rutinas') tab = 'rutinas'; // viene de tocar una notificación
+  else if (location.hash === '#lineas') tab = 'lineas'; // [pwa] atajos del manifest (#viaje es la pestaña por defecto)
   renderHome();
   // Avisos/Push no son necesarios para el primer render: se cargan cuando el navegador queda libre.
   const idle = (window as unknown as { requestIdleCallback?: (f: () => void) => void }).requestIdleCallback ?? ((f: () => void) => setTimeout(f, 1500));
@@ -1145,6 +1149,7 @@ setInterval(() => { if (!document.hidden && !tickRaf) tickRaf = requestAnimation
     import('./push').then((m) => m.registrarSW());
     import('./rutinas').then((m) => m.iniciarUbicacionPeriodica());
   });
+  initPWA(); // [pwa]
   const m = location.hash.match(/linea=([\w-]+)/);
   if (m && index.some((i) => i.file === m[1])) openLinea(m[1]);
 })();
