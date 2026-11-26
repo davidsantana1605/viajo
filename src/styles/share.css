@@ -1,0 +1,39 @@
+/* Compartir, QR, toast y viajes recientes (módulo share.ts) */
+.shr-ico { display: inline-flex; gap: 6px; flex: none; }
+.shr-row { display: flex; gap: 8px; padding: 6px 8px 2px; }
+.shr-row .btn { margin-top: 0; flex: 1; justify-content: center; padding: 9px 12px; }
+.shr-row .btn[data-qr] { flex: none; }
+.vhead .shr-ico { margin-right: 2px; }
+
+.shr-toast {
+  position: fixed; z-index: 50; left: 50%; bottom: calc(24px + env(safe-area-inset-bottom, 0px)); transform: translate(-50%, 16px);
+  display: flex; align-items: center; gap: 12px; max-width: min(92vw, 420px); padding: 10px 16px; border-radius: 16px;
+  font-size: 14px; font-weight: 550; color: var(--fg); opacity: 0; pointer-events: none; transition: opacity 0.2s, transform 0.2s;
+}
+.shr-toast.on { opacity: 1; transform: translate(-50%, 0); pointer-events: auto; }
+.shr-toast button { color: var(--accent); font-weight: 650; font-size: 14px; padding: 2px 4px; }
+
+.shr-dlg {
+  border: 0; border-radius: 22px; padding: 22px; width: min(92vw, 340px); text-align: center;
+  background: var(--solid, #fff); color: var(--fg); box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
+}
+.shr-dlg::backdrop { background: rgba(0, 0, 0, 0.45); backdrop-filter: blur(4px); }
+.shr-dlg h2 { margin: 0 0 4px; font-size: 18px; letter-spacing: -0.015em; }
+.shr-sub { margin: 0 0 12px; font-size: 13px; color: var(--fg2); }
+.shr-qr { background: #fff; border-radius: 14px; padding: 6px; display: inline-block; line-height: 0; }
+.shr-qr canvas { width: 240px; height: 240px; max-width: 100%; image-rendering: pixelated; }
+.shr-url { margin: 10px 0 0; font-size: 11px; color: var(--fg2); word-break: break-all; max-height: 3.6em; overflow: hidden; user-select: all; }
+.shr-act { display: flex; gap: 8px; justify-content: center; margin-top: 12px; }
+.shr-act .btn { margin-top: 0; }
+
+.rec { margin: 8px 4px 12px; }
+.rec-h { display: flex; justify-content: space-between; align-items: center; padding: 6px 12px; font-size: 12px; font-weight: 650; color: var(--fg2); text-transform: uppercase; letter-spacing: 0.06em; }
+.rec-h button { font-size: 12px; font-weight: 600; color: var(--accent); text-transform: none; letter-spacing: 0; }
+.rec-it { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; padding: 8px 12px; border-radius: 12px; }
+.rec-it:hover { background: var(--chip); }
+.rec-it:active { background: var(--chip-hover); }
+.rec-ic { width: 28px; height: 28px; border-radius: 50%; background: var(--chip); display: grid; place-items: center; color: var(--accent); flex: none; font-size: 15px; }
+.rec-t { min-width: 0; }
+.rec-t b, .rec-t small { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rec-t b { font-size: 14px; font-weight: 600; }
+.rec-t small { font-size: 12px; color: var(--fg2); }

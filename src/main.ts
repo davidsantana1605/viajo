@@ -19,6 +19,8 @@ import { montarCerca, cercaDetalle, cercaOcultar, decorarParadas, type CercaCtx 
 // [/cerca]
 import { montarChips, refrescarChips, coincidencias, conGuardados } from './lugares'; // [lugares]
 import { extras } from './viajeExtras'; // [viaje-extras]
+import { initShare, aplicarHash, shareBtns, syncLinea, syncViaje, syncTab, leaveLinea, guardarReciente, recientesHTML, bindRecientes } from './share'; // [share]
+import type { Pt } from './links'; // [share]
 
 /* ------------------------------------------------------------------ utilidades */
 const $ = <T extends HTMLElement>(s: string) => document.querySelector(s) as T;
@@ -340,7 +342,7 @@ function renderHome() {
       <button role="tab" data-t="rutinas" aria-pressed="${tab === 'rutinas'}">Rutinas</button>
     </div>
     ${tab === 'viaje' ? plannerHTML() : tab === 'rutinas' ? '' : `<label class="search">${ICON.search}<input id="q" type="search" placeholder="Buscar línea (ej. 101, K, Costa)" autocomplete="off" value="${esc(filtro)}" /></label>`}`;
-  head.querySelectorAll<HTMLButtonElement>('[data-t]').forEach((b) => (b.onclick = () => { tab = b.dataset.t as typeof tab; sug = null; renderHome(); }));
+  head.querySelectorAll<HTMLButtonElement>('[data-t]').forEach((b) => (b.onclick = () => { tab = b.dataset.t as typeof tab; sug = null; syncTab(tab) /* [share] */; renderHome(); }));
   if (tab === 'viaje') { bindPlanner(); drawTripContent(); }
   else if (tab === 'rutinas') {
     const ctx = { content, isMobile, setFull: () => setSnap('full'), esc };
@@ -444,6 +446,7 @@ async function tryPlan() {
   cercaOcultar(); // [cerca]
   rutaSel = null; clearTripMap(); clearBuses();
   placeEndpoints();
+  syncViaje(); // [share]
   if (origen.lng === undefined || destino.lng === undefined) { rutas = null; planEstado = 'idle'; drawTripContent(); return; }
   planAbort?.abort(); planAbort = new AbortController();
   planEstado = 'cargando'; rutas = null; drawTripContent();
@@ -451,6 +454,7 @@ async function tryPlan() {
   try {
     const r = await planificar({ lng: origen.lng, lat: origen.lat! }, { lng: destino.lng, lat: destino.lat! }, planAbort.signal);
     rutas = r; planEstado = r.length ? 'idle' : 'vacio';
+    if (r.length) guardarReciente(origen, destino); // [share]
     if (r.length) fitPoints([[origen.lng, origen.lat!], [destino.lng, destino.lat!]], 15.2);
   } catch (e) {
     if ((e as Error).name === 'AbortError') return;
@@ -510,6 +514,18 @@ function drawTripContent() {
   </div>`;
   $('#use-loc').onclick = useMyLocation;
   montarCerca(cercaCtx); // [cerca]
+  content.insertAdjacentHTML('beforeend', recientesHTML()); bindRecientes(content); // [share]
+}
+
+/** [share] Abre un viaje (desde un enlace o "recientes"): rellena origen/destino y planifica solo. */
+function abrirViaje(o: Pt, d: Pt) {
+  if (viaje) return;
+  tab = 'viaje'; sug = null; rutaSel = null;
+  origen = { texto: o.nombre, lng: o.lng, lat: o.lat };
+  destino = { texto: d.nombre, lng: d.lng, lat: d.lat };
+  if (linea) closeLinea();
+  renderHome();
+  tryPlan();
 }
 
 function tripCard(r: Ruta, best: boolean, i: number): string {
@@ -540,7 +556,7 @@ function drawDetalle(r: Ruta) {
     <button class="row back" id="back-res"><span class="iconbtn">${ICON.back}</span><span class="main"><div class="t">Alternativas</div></span></button>
     <div class="card sum"><b>${fmtDur(r.dur)}</b><span>${r.inicio} → ${r.fin}</span>
       <div class="s">${r.transbordos === 0 ? 'Sin transbordos' : r.transbordos + (r.transbordos === 1 ? ' transbordo' : ' transbordos')} · caminás ${fmtDist(r.caminata)}</div></div>
-    <div class="gorow"><button class="btn go" id="go-viaje">Iniciar viaje</button></div>
+    <div class="gorow"><button class="btn go" id="go-viaje">Iniciar viaje</button>${shareBtns('viaje')}</div>
     <div class="steps">${steps}<div class="step end"><span class="sico dest">${ICON.pin}</span><span class="main"><div class="t">Llegás a tu destino</div><div class="s">${esc(destino.texto)}</div></span><span class="hr">${r.fin}</span></div></div>
     <div class="note pad">Los colectivos en 3D son una <b>estimación</b> de dónde viene el próximo, según los arribos en vivo.</div>`;
   $('#back-res').onclick = () => { rutaSel = null; clearTripMap(); clearBuses(); drawTripContent(); fitPoints([[origen.lng!, origen.lat!], [destino.lng!, destino.lat!]], 15.2); };
@@ -839,7 +855,7 @@ function renderViaje(soft = false) {
 
   head.innerHTML = `
     <div class="vhead"><div class="vt"><small>Viaje en curso</small><b>Hacia ${esc(destino.texto)}</b></div>
-      <button class="btn sm danger" id="fin-viaje">Terminar</button></div>
+      ${v.fin ? '' : shareBtns('eta', true)}<button class="btn sm danger" id="fin-viaje">Terminar</button></div>
     <div class="vprog">${v.ruta.tramos.map((x, k) => `<i class="${k < v.i || v.fin ? 'done' : k === v.i ? 'cur' : ''} ${x.modo}"></i>`).join('')}</div>`;
 
   // aviso principal: atraso / mejor opción / al mismo tiempo
@@ -949,6 +965,7 @@ function renderLinea() {
       <button class="iconbtn" id="back" aria-label="Volver">${ICON.back}</button>
       ${badge(l, true)}
       <div class="info"><b>${esc(l.nombre)}</b><span>${esc(empresaNombre(l.empresa))} · ${l.stops.length} paradas</span></div>
+      ${shareBtns('linea', true)}
     </div>
     <div class="seg" role="group" aria-label="Sentido">
       ${(['ida', 'vuelta', 'ambas'] as const).map((d) => `<button data-d="${d}" aria-pressed="${direccion === d}">${d[0].toUpperCase() + d.slice(1)}</button>`).join('')}
@@ -1017,7 +1034,7 @@ function stopCard(): string {
   }
   return `<div class="card">
     <div class="top"><div><h3>${esc(parada.nombre)}</h3><div class="sub">${esc(parada.desc || 'Parada')} · próximos arribos</div></div>
-    <button class="iconbtn" id="close-stop" aria-label="Cerrar parada">${ICON.close}</button></div>${body}</div>`;
+    ${shareBtns('parada', true)}<button class="iconbtn" id="close-stop" aria-label="Cerrar parada">${ICON.close}</button></div>${body}</div>`;
 }
 
 /** Sólo repinta la tarjeta de la parada (se refresca cada 30 s) sin reconstruir las ~190 filas de paradas. */
@@ -1051,7 +1068,7 @@ async function openLinea(file: string, stopId?: string) {
   refreshSources(); fitLinea();
   renderLinea();
   if (isMobile()) setSnap('half');
-  history.replaceState(null, '', `#linea=${file}`);
+  syncLinea(file); // [share]
   startLive();
   if (stopId) { const p = l.stops.find((s) => s.id === stopId); if (p) selectStop(p, true); }
 }
@@ -1060,7 +1077,7 @@ function closeLinea() {
   linea = null; parada = null; paradaData = null;
   stopLive(); clearBuses(); clearInterval(stopTimer);
   refreshSources();
-  history.replaceState(null, '', location.pathname);
+  leaveLinea(); // [share]
   renderHome();
   placeEndpoints();
   if (rutaSel) drawTrip(rutaSel, false);
@@ -1068,6 +1085,7 @@ function closeLinea() {
 
 function selectStop(p: Parada, fly: boolean) {
   parada = p; paradaData = null; paradaError = false;
+  if (linea) syncLinea(linea.file, p.id); // [share]
   if (map.getLayer('stops-sel')) map.setFilter('stops-sel', ['==', ['get', 'id'], p.id]);
   if (fly) map.easeTo({ center: [p.lng, p.lat], zoom: Math.max(map.getZoom(), 15.4), duration: 700 });
   if (isMobile() && snap === 'peek') setSnap('half');
@@ -1085,6 +1103,7 @@ function selectStop(p: Parada, fly: boolean) {
 
 function clearStop() {
   parada = null; paradaData = null; clearInterval(stopTimer);
+  if (linea) syncLinea(linea.file); // [share]
   if (map.getLayer('stops-sel')) map.setFilter('stops-sel', ['==', ['get', 'id'], '']);
   drawBody();
 }
@@ -1201,8 +1220,17 @@ const cercaCtx: CercaCtx = {
     import('./rutinas').then((m) => m.iniciarUbicacionPeriodica());
   });
   initPWA(); // [pwa]
-  const m = location.hash.match(/linea=([\w-]+)/);
-  if (m && index.some((i) => i.file === m[1])) openLinea(m[1]);
+  // [share] router de enlaces profundos (#linea, #parada, #viaje, #rutinas) + hashchange
+  initShare({
+    linea: () => linea, parada: () => parada, origen: () => origen, destino: () => destino,
+    ruta: () => viaje?.ruta ?? rutaSel,
+    viaje: () => (viaje ? { llegadaMs: llegadaEstimada(viaje), fin: viaje.fin } : null),
+    hhmm, openLinea, closeLinea, abrirViaje,
+    setTab: (t) => { tab = t; sug = null; renderHome(); },
+    hayLinea: (file) => index.some((i) => i.file === file),
+    fileDe: (id, emp) => idxOf(id, emp)?.file,
+  });
+  aplicarHash();
 })();
 
 (window as unknown as Record<string, unknown>).__viajo = { map, openLinea, selectRuta, pick, get rutas() { return rutas; }, get buses() { return busList; }, startViaje, onPos, get viaje() { return viaje; } };

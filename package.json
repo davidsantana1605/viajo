@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "test": "vitest run && node --test test/avisos.test.mjs",
+    "test": "vitest run && node --test test/avisos.test.mjs tests/links.test.ts",
     "data": "node scripts/fetch-data.mjs && node scripts/build-paradas.mjs"
   },
   "devDependencies": {
