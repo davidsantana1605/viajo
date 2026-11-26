@@ -10,7 +10,7 @@ function csp(pushUrl: string): Plugin {
     "style-src 'self' 'unsafe-inline'", // MapLibre y la UI usan estilos en línea (style="--c:…"); los scripts en línea siguen prohibidos
     "img-src 'self' data: blob:",
     "font-src 'self'",
-    `connect-src 'self' https://tiles.openfreemap.org https://ws.rosario.gob.ar${push ? ' ' + push : ''}`,
+    `connect-src 'self' https://tiles.openfreemap.org https://ws.rosario.gob.ar https://photon.komoot.io${push ? ' ' + push : ''}`,
     "worker-src 'self' blob:",
     "child-src 'self' blob:",
     "manifest-src 'self'",

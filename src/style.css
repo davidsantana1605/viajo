@@ -279,11 +279,11 @@ b, strong { font-weight: 650; }
 .me-dot { width: 18px; height: 18px; border-radius: 50%; background: #0a84ff; border: 3px solid #fff; box-shadow: 0 0 0 6px rgba(10, 132, 255, 0.25), 0 2px 8px rgba(0, 0, 0, 0.35); animation: meBreath 2.4s ease-in-out infinite; }
 @keyframes meBreath { 50% { box-shadow: 0 0 0 10px rgba(10, 132, 255, 0.12), 0 2px 8px rgba(0, 0, 0, 0.35); } }
 .me-dot.o { width: 16px; height: 16px; background: #fff; border: 4.5px solid #0a84ff; box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.9), 0 2px 8px rgba(0, 0, 0, 0.4); animation: none; }
-.bus-tag { position: relative; }
+.bus-tag { /* MapLibre posiciona el marcador con position:absolute: no pisarlo */ }
 .bus-tag b { display: block; font-size: 11px; font-weight: 800; color: #fff; background: var(--c); padding: 2px 8px; border-radius: 9px; border: 2px solid #fff; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35); letter-spacing: -0.02em; text-shadow: 0 1px 1px rgba(0, 0, 0, 0.3); font-variant-numeric: tabular-nums; }
 .bus-tag::after { content: ''; position: absolute; left: 50%; bottom: -5px; width: 8px; height: 8px; background: #fff; transform: translateX(-50%) rotate(45deg); border-radius: 0 0 2px 0; box-shadow: 2px 2px 4px rgba(0, 0, 0, 0.25); z-index: -1; }
 .bus-tag.est b { opacity: 0.94; border-style: dashed; }
-.dest-pin { position: relative; color: var(--pin); filter: drop-shadow(0 3px 4px rgba(0, 0, 0, 0.4)); line-height: 0; }
+.dest-pin { color: var(--pin); filter: drop-shadow(0 3px 4px rgba(0, 0, 0, 0.4)); line-height: 0; }
 .dest-pin svg { display: block; }
 .dest-pin::after { content: ''; position: absolute; left: 50%; bottom: -3px; width: 14px; height: 5px; margin-left: -7px; border-radius: 50%; background: rgba(0, 0, 0, 0.3); filter: blur(1.5px); z-index: -1; }
 

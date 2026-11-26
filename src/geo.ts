@@ -34,8 +34,11 @@ const flat = (c: unknown): number[][] => {
   return (c as unknown[]).flatMap(flat);
 };
 
-/** Busca direcciones, esquinas y lugares con el geocodificador oficial de Rosario. */
-export async function buscarLugares(term: string, signal?: AbortSignal): Promise<Lugar[]> {
+const BBOX = '-60.85,-33.1,-60.5,-32.8'; // Gran Rosario
+const enZona = (lng: number, lat: number) => lng > -60.85 && lng < -60.5 && lat > -33.1 && lat < -32.8;
+
+/** Direcciones, esquinas y calles con el geocodificador oficial de Rosario. */
+async function buscarMunicipal(term: string, signal?: AbortSignal): Promise<Lugar[]> {
   const r = await fetch(`${API}/geojson/ubicaciones?term=${encodeURIComponent(term)}&extendido=true&conOtrasLocalidades=false`, { signal });
   if (!r.ok) return [];
   const d = (await r.json()) as { features?: Feat[] };
@@ -55,7 +58,45 @@ export async function buscarLugares(term: string, signal?: AbortSignal): Promise
       detalle: [calle ? 'Calle · agregá la altura para mayor precisión' : tipo.replace(/DIRECCI.N/i, 'Dirección'), barrio ? titulo(barrio) : ''].filter(Boolean).join(' · '),
       lng, lat,
     });
-    if (out.length >= 6) break;
+  }
+  return out;
+}
+
+interface PhotonFeat { geometry?: { coordinates?: number[] }; properties?: { name?: string; street?: string; housenumber?: string; district?: string; locality?: string; city?: string; osm_value?: string } }
+
+/** Comercios y lugares (Carrefour, hospitales, plazas…) desde OpenStreetMap vía Photon, acotado a Rosario. Si falla, se ignora. */
+async function buscarLugaresOSM(term: string, signal?: AbortSignal): Promise<Lugar[]> {
+  const r = await fetch(`https://photon.komoot.io/api/?q=${encodeURIComponent(term)}&limit=8&lang=default&lat=-32.9468&lon=-60.65&bbox=${BBOX}`, { signal });
+  if (!r.ok) return [];
+  const d = (await r.json()) as { features?: PhotonFeat[] };
+  const out: Lugar[] = [];
+  for (const f of d.features ?? []) {
+    const p = f.properties, c = f.geometry?.coordinates;
+    if (!p?.name || !c || c.length < 2 || !enZona(c[0], c[1])) continue;
+    const calle = [p.street, p.housenumber].filter(Boolean).join(' ');
+    const zona = p.district || p.locality || p.city;
+    out.push({ nombre: p.name, detalle: [calle, zona].filter(Boolean).join(' · ') || 'Lugar', lng: c[0], lat: c[1] });
+  }
+  return out;
+}
+
+/**
+ * Busca direcciones, esquinas, calles y lugares. Si el texto parece una dirección (tiene números o " y ") van primero
+ * las del municipio; si parece el nombre de un lugar ("carrefour") van primero los comercios.
+ */
+export async function buscarLugares(term: string, signal?: AbortSignal): Promise<Lugar[]> {
+  const [mun, osm] = await Promise.all([
+    buscarMunicipal(term, signal),
+    buscarLugaresOSM(term, signal).catch((e) => { if ((e as Error).name === 'AbortError') throw e; return [] as Lugar[]; }),
+  ]);
+  const direccion = /\d/.test(term) || /\sy\s/i.test(term);
+  const mezcla = direccion ? [...mun, ...osm] : [...osm, ...mun];
+  const vistos = new Set<string>(), out: Lugar[] = [];
+  for (const l of mezcla) {
+    const k = `${l.nombre.toLowerCase()}|${l.lng.toFixed(3)}|${l.lat.toFixed(3)}`;
+    if (vistos.has(k)) continue;
+    vistos.add(k); out.push(l);
+    if (out.length >= 8) break;
   }
   return out;
 }

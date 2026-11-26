@@ -948,7 +948,10 @@ function renderViaje(soft = false) {
   const mejor = v.alts[0];
   const atraso = !v.abordo && v.etaBoard !== null && v.delayMs !== 0 ? Math.round(v.delayMs / 60000) : 0;
   let aviso = '';
-  if (!v.fin && !v.abordo) {
+  const planeado = t.inicioMs ? (t.inicioMs - Date.now()) / 60000 : 0;
+  const esperaLarga = !v.fin && !v.abordo && t.modo === 'bus' && v.etaBoard !== null && v.etaBoard > Math.max(30, planeado + 20);
+  if (esperaLarga) aviso = `<div class="banner warn" role="alert"><b>Sin servicio frecuente ahora</b>El próximo ${esc(t.linea!.nombre)} pasa en ${fmtMin(v.etaBoard!)}, mucho más tarde de lo previsto. La hora de llegada de arriba no lo contempla: mirá las alternativas.</div>`;
+  if (!v.fin && !v.abordo && !esperaLarga) {
     if (mejor && mejor.delta <= -3) aviso = `<div class="banner better" role="status"><b>Hay una opción mejor</b>Llegás ${-mejor.delta} min antes con ${esc(mejor.ruta.denom)}${mejor.ruta.caminata > v.ruta.caminata + 50 ? ` (caminás ${fmtDist(mejor.ruta.caminata - v.ruta.caminata)} más)` : ''}.</div>`;
     else if (atraso >= 4) aviso = `<div class="banner warn" role="alert"><b>Tu colectivo viene ~${atraso} min atrasado</b>${mejor ? 'Mirá las alternativas de abajo.' : 'No encontré una alternativa mejor por ahora.'}</div>`;
     else if (v.alts.some((a) => Math.abs(a.delta) <= 3)) aviso = `<div class="banner same" role="status"><b>Al mismo tiempo</b>Hay otras opciones que llegan casi a la misma hora (±3 min) si preferís no esperar.</div>`;
