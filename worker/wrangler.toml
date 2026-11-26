@@ -1,0 +1,19 @@
+name = "viajo-push"
+main = "src/index.ts"
+compatibility_date = "2025-01-01"
+
+# Revisa cada minuto qué rutinas tienen un aviso para enviar.
+[triggers]
+crons = ["* * * * *"]
+
+# Se crea con:  npx wrangler kv namespace create DB   y se pega acá el "id" que devuelve.
+[[kv_namespaces]]
+binding = "DB"
+id = "REEMPLAZAR_CON_EL_ID_DEL_KV"
+
+[vars]
+# Contacto que los servicios push piden en el token VAPID (URL pública, no un correo personal).
+VAPID_SUBJECT = "https://github.com/davidsantana1605/viajo"
+ALLOWED_ORIGINS = "https://davidsantana1605.github.io,http://localhost:5173,http://localhost:4173"
+
+# Secretos (NO van acá): VAPID_PRIVATE_KEY y VAPID_PUBLIC_KEY → ver worker/README.md

@@ -11,6 +11,13 @@ npm run build    # versión de producción en dist/
 npm run data     # actualiza el respaldo de líneas/recorridos/paradas
 ```
 
+## Funciones
+
+- Mapa estilo Apple Maps (claro/oscuro, edificios 3D) y 54 líneas con recorrido, paradas y arribos.
+- **Planificar viaje** (planificador oficial de Cómo Llego) y **Iniciar viaje**: seguimiento en vivo, avisos de atraso y alternativas ("al mismo tiempo", "opción mejor").
+- Colectivos 3D con posición **estimada** a partir de los arribos en vivo (la API no entrega la posición real).
+- **Rutinas con notificaciones push**: elegís destino, días y hora de llegada y te avisa cuándo salir. Requiere publicar el worker de `worker/` (ver [worker/README.md](worker/README.md)).
+
 ## Cómo funciona
 
 - **Mapa:** [MapLibre GL JS](https://maplibre.org/) con teselas vectoriales de [OpenFreeMap](https://openfreemap.org/) y un estilo propio (`src/mapStyle.ts`) en dos paletas.

@@ -76,41 +76,55 @@ export function estimate(routes: LL[][], stop: LL, minutes: number): Est | null 
 }
 
 /** Une estimaciones que caen casi en el mismo lugar (el mismo colectivo visto desde varias paradas). */
-export function dedupe(list: Est[], within = 140): Est[] {
-  const out: Est[] = [];
+export function dedupe<T extends Est>(list: T[], within = 140): T[] {
+  const out: T[] = [];
   for (const e of list) if (!out.some((o) => dist([o.lng, o.lat], [e.lng, e.lat]) < within)) out.push(e);
   return out;
 }
 
 /* ---------- Geometría 3D ---------- */
-function box(c: LL, heading: number, len: number, wid: number): LL[] {
+// Un colectivo armado con prismas apilados (fill-extrusion): zócalo, carrocería, franja de ventanas con
+// parantes, techo con aire acondicionado, cartel de destino, luces y ruedas. ~19 polígonos por colectivo.
+
+/** Polígono dado en metros locales [adelante, derecha] → coordenadas geográficas, rotado según el rumbo. */
+function local(c: LL, heading: number, s: number, pts: [number, number][]): LL[] {
   const kLat = 1 / 111320, kLng = 1 / (111320 * Math.cos(rad(c[1])));
   const h = rad(heading);
-  const f = [Math.sin(h), Math.cos(h)]; // adelante (este, norte)
-  const r = [Math.cos(h), -Math.sin(h)]; // derecha
-  const pts: LL[] = [];
-  for (const [a, b] of [[1, 1], [1, -1], [-1, -1], [-1, 1], [1, 1]] as const) {
-    const e = f[0] * (a * len) / 2 + r[0] * (b * wid) / 2;
-    const n = f[1] * (a * len) / 2 + r[1] * (b * wid) / 2;
-    pts.push([c[0] + e * kLng, c[1] + n * kLat]);
-  }
-  return pts;
+  const f = [Math.sin(h), Math.cos(h)], r = [Math.cos(h), -Math.sin(h)];
+  const out = pts.map(([a, b]): LL => {
+    const e = (f[0] * a + r[0] * b) * s, n = (f[1] * a + r[1] * b) * s;
+    return [c[0] + e * kLng, c[1] + n * kLat];
+  });
+  out.push(out[0]);
+  return out;
 }
+/** Rectángulo [f0,f1] × [r0,r1] con esquinas biseladas (bf adelante, br atrás). */
+const rect = (f0: number, f1: number, r0: number, r1: number, bf = 0, br = 0): [number, number][] =>
+  [[f1 - bf, r1], [f1, r1 - bf], [f1, r0 + bf], [f1 - bf, r0], [f0 + br, r0], [f0, r0 + br], [f0, r1 - br], [f0 + br, r1]];
 
-/** Escala visual: a zoom lejano el colectivo real sería invisible, así que se agranda. */
-export const busScale = (zoom: number) => Math.min(12, Math.max(2.6, 2 ** (17.9 - zoom)));
+/** Escala visual: a zoom lejano un colectivo real sería invisible, así que se agranda. */
+export const busScale = (zoom: number) => Math.min(12, Math.max(1.3, 2 ** (18.2 - zoom)));
+
+const L = 6, W = 1.275; // medio largo y medio ancho (12 m × 2,55 m)
 
 export function busFeatures(buses: (Est & { color: string })[], zoom: number): GeoJSON.Feature[] {
   const s = busScale(zoom);
-  const L = 12 * s, W = 2.6 * s, H = 3.1 * Math.min(s, 3.2);
   const out: GeoJSON.Feature[] = [];
-  for (const b of buses) {
-    const c: LL = [b.lng, b.lat];
-    out.push({ type: 'Feature', properties: { c: b.color, b: 0.4 * Math.min(s, 3.2), h: H }, geometry: { type: 'Polygon', coordinates: [box(c, b.heading, L, W)] } });
-    // franja de ventanas, un poco más ancha que la carrocería
-    out.push({ type: 'Feature', properties: { c: '#dbeafe', b: H * 0.52, h: H * 0.86 }, geometry: { type: 'Polygon', coordinates: [box(c, b.heading, L * 0.86, W * 1.06)] } });
-    // techo
-    out.push({ type: 'Feature', properties: { c: '#f5f5f7', b: H * 0.86, h: H * 1.06 }, geometry: { type: 'Polygon', coordinates: [box(c, b.heading, L * 0.96, W * 0.96)] } });
+  for (const bus of buses) {
+    const c: LL = [bus.lng, bus.lat];
+    const part = (pts: [number, number][], color: string, base: number, top: number) =>
+      out.push({ type: 'Feature', properties: { c: color, b: base * s, h: top * s }, geometry: { type: 'Polygon', coordinates: [local(c, bus.heading, s, pts)] } });
+    const GLASS = '#1c2a40', DARK = '#16171a', WHITE = '#eef0f3';
+
+    part(rect(-L + 0.2, L - 0.2, -W + 0.15, W - 0.15, 0.4, 0.2), DARK, 0.25, 0.9); // zócalo / chasis
+    part(rect(-L, L, -W, W, 0.7, 0.3), bus.color, 0.9, 1.45); // carrocería inferior
+    part(rect(-L, L, -W, W, 0.7, 0.3), GLASS, 1.45, 2.6); // franja de vidrios
+    for (const f of [-4.6, -3.1, -1.6, -0.1, 1.4, 2.9, 4.4]) part(rect(f - 0.09, f + 0.09, -W - 0.05, W + 0.05), bus.color, 1.45, 2.6); // parantes
+    part(rect(-L + 0.1, L - 0.1, -W + 0.1, W - 0.1, 0.6, 0.25), bus.color, 2.6, 2.85); // techo
+    part(rect(-3.2, -0.2, -0.65, 0.65, 0.15, 0.15), WHITE, 2.85, 3.2); // equipo de aire
+    part(rect(L - 0.25, L + 0.08, -0.95, 0.95), '#ffb800', 2.5, 2.95); // cartel de destino
+    for (const side of [-1, 1]) part(rect(L - 0.05, L + 0.07, side * 0.75, side * 1.1), '#fff4c2', 0.5, 0.85); // faros
+    for (const f of [3.7, -3.1]) for (const side of [-1, 1]) part(rect(f - 0.55, f + 0.55, side * (W - 0.02) - 0.12, side * (W - 0.02) + 0.12), '#0d0d0f', 0, 1.0); // ruedas
   }
   return out;
 }

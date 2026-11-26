@@ -3,3 +3,15 @@ dist/
 .claude/
 *.log
 .DS_Store
+
+# Secretos y artefactos del worker de push (el repo es público)
+.dev.vars
+worker/.dev.vars
+worker/node_modules/
+worker/.wrangler/
+.wrangler/
+vapid-keys.json
+*.pem
+
+.env.local
+.env*.local
