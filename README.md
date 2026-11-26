@@ -29,6 +29,13 @@ npm run data     # actualiza el respaldo de líneas/recorridos/paradas
 - La API no expone la posición de los colectivos (coordenadas e interno vienen vacíos), por lo que el mapa no los dibuja. El código de los marcadores queda listo por si eso cambia.
 - Los datos provienen de la API pública que usa la app oficial *Cómo Llego* (Municipalidad de Rosario / Ente de la Movilidad). No es una API documentada ni oficialmente soportada; no hay vínculo con el municipio.
 
+## Privacidad y seguridad
+
+- Sin cuenta ni analítica. Las rutinas y tu nombre se guardan en el `localStorage` de tu navegador.
+- Si activás las notificaciones, la app envía al worker de avisos tu suscripción push, tu nombre, tus rutinas y (sólo si una rutina usa "mi ubicación") tu última ubicación; se conserva hasta 45 días sin actividad (la ubicación, 6 h) y *Rutinas → Desactivar* lo borra todo. Detalle en [worker/README.md](worker/README.md).
+- La búsqueda de direcciones y los arribos se consultan directamente a la API del municipio; los mapas a OpenFreeMap (ven tu IP, como en cualquier web).
+- La build incluye una Content-Security-Policy (`vite.config.ts`) y todo texto externo se escapa antes de insertarse en el HTML.
+
 ## Créditos
 
 © OpenStreetMap contributors · OpenMapTiles · OpenFreeMap.

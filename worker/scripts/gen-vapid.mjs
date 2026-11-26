@@ -14,6 +14,6 @@ const jwk = await crypto.subtle.exportKey('jwk', kp.privateKey);
 const pub = Buffer.concat([Buffer.from([4]), Buffer.from(jwk.x, 'base64url'), Buffer.from(jwk.y, 'base64url')]);
 const keys = { publicKey: b64u(pub), privateKey: jwk.d };
 writeFileSync(FILE, JSON.stringify(keys, null, 2));
-writeFileSync(new URL('../.dev.vars', import.meta.url), `VAPID_PUBLIC_KEY=${keys.publicKey}\nVAPID_PRIVATE_KEY=${keys.privateKey}\nDEBUG=1\n`);
+writeFileSync(new URL('../.dev.vars', import.meta.url), `VAPID_PUBLIC_KEY=${keys.publicKey}\nVAPID_PRIVATE_KEY=${keys.privateKey}\nDEBUG=1\nDEBUG_TOKEN=${Buffer.from(crypto.getRandomValues(new Uint8Array(16))).toString('hex')}\n`);
 console.log('Claves generadas en worker/vapid-keys.json y worker/.dev.vars (ambos ignorados por git).');
 console.log('Clave pública:', keys.publicKey);
