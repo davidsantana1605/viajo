@@ -17,6 +17,8 @@ import { initPWA, estaOffline } from './pwa'; // [pwa]
 // [cerca]
 import { montarCerca, cercaDetalle, cercaOcultar, decorarParadas, type CercaCtx } from './cerca';
 // [/cerca]
+import { montarChips, refrescarChips, coincidencias, conGuardados } from './lugares'; // [lugares]
+import { extras } from './viajeExtras'; // [viaje-extras]
 
 /* ------------------------------------------------------------------ utilidades */
 const $ = <T extends HTMLElement>(s: string) => document.querySelector(s) as T;
@@ -376,7 +378,8 @@ function plannerHTML() {
       <input id="in-d" type="text" placeholder="¿A dónde vas?" autocomplete="off" enterkeyhint="go" value="${esc(destino.texto)}" />
     </div>
     <button class="iconbtn" id="swap" aria-label="Invertir origen y destino" title="Invertir">${ICON.swap}</button>
-  </div>`;
+  </div>
+  <div id="lg-chips"></div>`; // [lugares]
 }
 
 let debounce = 0;
@@ -386,7 +389,7 @@ function bindPlanner() {
   const wire = (el: HTMLInputElement, campo: 'o' | 'd') => {
     const get = () => (campo === 'o' ? origen : destino);
     el.onfocus = () => { if (isMobile()) setSnap('full'); onType(campo, el.value); };
-    el.oninput = () => { const c = get(); c.texto = el.value; c.lng = c.lat = undefined; clearTimeout(debounce); debounce = window.setTimeout(() => onType(campo, el.value), 260); };
+    el.oninput = () => { const c = get(); c.texto = el.value; c.lng = c.lat = undefined; refrescarChips(); /* [lugares] */ clearTimeout(debounce); debounce = window.setTimeout(() => onType(campo, el.value), 260); };
     el.onblur = () => setTimeout(() => { if (document.activeElement !== io && document.activeElement !== id) { sug = null; drawTripContent(); } }, 180);
     el.onkeydown = (e) => {
       if (e.key === 'Escape') { sug = null; el.blur(); drawTripContent(); }
@@ -394,20 +397,25 @@ function bindPlanner() {
     };
   };
   wire(io, 'o'); wire(id, 'd');
-  $('#swap').onclick = () => { [origen, destino] = [destino, origen]; io.value = origen.texto; id.value = destino.texto; tryPlan(); };
+  // [lugares] chips de Casa / Trabajo / favoritos: completan el campo enfocado (si no hay, el destino; si ya está, el origen)
+  montarChips($('#lg-chips'), {
+    alElegir: (l) => { const a = document.activeElement?.id; pick(a === 'in-o' ? 'o' : a === 'in-d' ? 'd' : destino.lng === undefined ? 'd' : 'o', l); },
+    candidatos: () => [origen, destino].map((c) => ({ nombre: c.texto, lng: c.lng, lat: c.lat })),
+  });
+  $('#swap').onclick = () => { [origen, destino] = [destino, origen]; io.value = origen.texto; id.value = destino.texto; refrescarChips(); tryPlan(); }; // [lugares]
 }
 
 async function onType(campo: 'o' | 'd', term: string) {
   term = term.trim();
   sugAbort?.abort();
-  if (term.length < 3) { sug = { campo, items: [], cargando: false }; drawTripContent(); return; }
+  if (term.length < 3) { sug = { campo, items: coincidencias(term), cargando: false }; drawTripContent(); return; } // [lugares]
   sug = { campo, items: [], cargando: true }; drawTripContent();
   sugAbort = new AbortController();
   try {
-    sug = { campo, items: await buscarLugares(term, sugAbort.signal), cargando: false };
+    sug = { campo, items: conGuardados(term, await buscarLugares(term, sugAbort.signal)), cargando: false }; // [lugares]
   } catch (e) {
     if ((e as Error).name === 'AbortError') return;
-    sug = { campo, items: [], cargando: false };
+    sug = { campo, items: coincidencias(term), cargando: false }; // [lugares]
   }
   drawTripContent();
 }
@@ -417,7 +425,7 @@ function pick(campo: 'o' | 'd', l: Lugar) {
   c.texto = l.nombre; c.lng = l.lng; c.lat = l.lat;
   const el = $<HTMLInputElement>(campo === 'o' ? '#in-o' : '#in-d');
   el.value = l.nombre; el.blur();
-  sug = null;
+  sug = null; refrescarChips(); // [lugares]
   if (campo === 'o' && destino.lng === undefined) $<HTMLInputElement>('#in-d').focus();
   tryPlan();
 }
@@ -427,7 +435,7 @@ async function useMyLocation() {
     const [lng, lat] = await locate();
     origen = { texto: 'Mi ubicación', lng, lat };
     $<HTMLInputElement>('#in-o').value = origen.texto;
-    sug = null;
+    sug = null; refrescarChips(); // [lugares]
     if (destino.lng === undefined) $<HTMLInputElement>('#in-d').focus(); else tryPlan();
   } catch { alert('No pude obtener tu ubicación. Revisá los permisos del navegador o escribí una dirección.'); }
 }
@@ -639,6 +647,7 @@ function startViaje(r: Ruta) {
     alts: [], replanned: false, follow: true, watch: null, lastReplan: 0, timer: 0, fin: false, gpsError: false, busy: false, preview: null,
   };
   viaje = v; sug = null; rutaSel = r;
+  extras.start({ getLinea: lineaDe, alPasarse: planDesdeAqui }); // [viaje-extras]
   drawTrip(r, true);
   if (navigator.geolocation) {
     v.watch = navigator.geolocation.watchPosition(
@@ -653,9 +662,20 @@ function startViaje(r: Ruta) {
   if (isMobile()) setSnap('half');
 }
 
+/** [viaje-extras] Te pasaste de parada: planifica desde tu posición actual hasta el mismo destino. */
+function planDesdeAqui() {
+  const gps = viaje?.gps ?? null;
+  stopViaje(false);
+  if (gps) origen = { texto: 'Mi ubicación', lng: gps[0], lat: gps[1] };
+  tab = 'viaje'; sug = null; rutaSel = null;
+  renderHome();
+  void tryPlan();
+}
+
 function stopViaje(redraw = true) {
   const v = viaje;
   if (!v) return;
+  extras.stop(); // [viaje-extras]
   clearInterval(v.timer);
   if (v.watch !== null) navigator.geolocation.clearWatch(v.watch);
   viaje = null; clearBuses();
@@ -682,6 +702,7 @@ function onPos(ll: LL) {
     if (t.modo === 'bus' && !v.abordo && dist(ll, [t.desde.lng, t.desde.lat]) > 220) { v.abordo = true; v.etaAlight = null; }
     else if (t.modo === 'bus' && v.abordo && aHasta < 70) { avanzar(); return; }
   }
+  extras.pos(v); // [viaje-extras]
   if (v.follow && !v.fin) map.easeTo({ center: ll, zoom: Math.max(map.getZoom(), 16), duration: 900 });
   if (v.abordo) mostrarMiBus();
   renderViaje(true);
@@ -754,6 +775,7 @@ async function pollViaje() {
     }
     if (viaje === v && !v.abordo && now - v.lastReplan > 55000) await replanear(v);
   } finally { v.busy = false; }
+  if (viaje) extras.eta(viaje); // [viaje-extras]
   if (viaje) renderViaje(true);
 }
 
@@ -866,9 +888,11 @@ function renderViaje(soft = false) {
     </div>
     ${aviso}${alts}
     <div class="sec">Tu recorrido</div><div class="vsteps">${pasos}</div>
+    ${extras.panelHTML(v)}
     <div class="note pad">${v.gps ? 'Siguiendo tu ubicación: los pasos avanzan solos.' : v.gpsError ? 'Sin acceso al GPS: avanzá los pasos con los botones.' : 'Esperando señal de GPS…'} Los tiempos en vivo se actualizan cada 20 s; las alternativas, cada minuto.</div>`;
 
   $('#fin-viaje').onclick = () => stopViaje();
+  extras.bindPanel(content); // [viaje-extras]
   document.getElementById('v-next')?.addEventListener('click', () => {
     if (t.modo === 'bus' && !v.abordo) { v.abordo = true; v.etaAlight = null; mostrarMiBus(); renderViaje(true); pollViaje(); }
     else avanzar();
