@@ -14,20 +14,13 @@ import { planificar, type Ruta } from './trip';
 import { estimate, dedupe, headingNear, busFeatures, dist, type Est } from './bus3d';
 import { renderRutinas, iniciarUbicacionPeriodica } from './rutinas';
 import { registrarSW } from './push';
+import { norm, fmtDur, fmtDist, fmtMin, frecuencia } from './util';
 
 /* ------------------------------------------------------------------ utilidades */
 const $ = <T extends HTMLElement>(s: string) => document.querySelector(s) as T;
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
-const norm = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
 const isMobile = () => matchMedia('(max-width: 760px)').matches;
 type LL = [number, number];
-
-const fmtDur = (s: number) => {
-  const m = Math.max(1, Math.round(s / 60));
-  return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, '0')}`;
-};
-const fmtDist = (m: number) => (m < 1000 ? `${Math.round(m / 10) * 10} m` : `${(m / 1000).toFixed(1).replace('.', ',')} km`);
-const fmtMin = (m: number) => (m <= 0 ? 'ahora' : m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, '0')}`);
 
 const ICON = {
   search: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>',
@@ -944,16 +937,6 @@ const fmtArribo = (a: Arribo) => {
   const t = a.arriboEnMinutos <= 0 ? 'Ahora' : a.arriboEnMinutos < 60 ? `${a.arriboEnMinutos} min` : a.horaArribo;
   return live ? `<span class="pill live">${t}</span>` : `<span class="pill prog" title="Horario programado">${t}</span>`;
 };
-
-/** Intervalo medio (min) entre los próximos arribos informados. Null si hay menos de dos. */
-function frecuencia(list: Arribo[]): number | null {
-  const d: number[] = [];
-  for (let i = 1; i < list.length; i++) {
-    const g = list[i].arriboEnMinutos - list[i - 1].arriboEnMinutos;
-    if (g > 0) d.push(g);
-  }
-  return d.length ? Math.round(d.reduce((a, b) => a + b, 0) / d.length) : null;
-}
 
 /** Resumen de frecuencia y espera para la línea abierta en la parada seleccionada. */
 function frecuenciaResumen(x: ArriboLinea | undefined): string {

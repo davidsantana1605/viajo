@@ -7,12 +7,14 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
+    "test": "vitest run",
     "data": "node scripts/fetch-data.mjs"
   },
   "devDependencies": {
     "@types/geojson": "^7946.0.16",
     "typescript": "^7.0.2",
-    "vite": "^8.3.8"
+    "vite": "^8.3.8",
+    "vitest": "^4.1.12"
   },
   "dependencies": {
     "maplibre-gl": "^6.19.0"
