@@ -15,3 +15,10 @@ vapid-keys.json
 
 .env.local
 .env*.local
+.env
+.env.*
+!.env.example
+.dev.vars.*
+*.key
+*.p12
+worker/vapid-keys.json

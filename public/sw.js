@@ -19,7 +19,11 @@ self.addEventListener('push', (event) => {
 
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
-  const url = new URL(event.notification.data?.url || './', self.registration.scope).href;
+  let url = new URL('./', self.registration.scope).href;
+  try {
+    const u = new URL(event.notification.data?.url || './', self.registration.scope);
+    if (u.origin === self.location.origin) url = u.href; // nunca navegar fuera de la app
+  } catch { /* usa la raíz */ }
   event.waitUntil(
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((list) => {
       for (const c of list) if ('focus' in c) { c.navigate?.(url); return c.focus(); }
