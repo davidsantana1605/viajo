@@ -46,6 +46,11 @@ let ctx: Ctx;
 let push: EstadoPush | null = null;
 let aviso: { tipo: 'ok' | 'error'; texto: string } | null = null;
 
+const SVG_PLUS = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>';
+const SVG_BACK = '<svg width="9" height="15" viewBox="0 0 9 15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7.5 1.5 2 7.5l5.5 6"/></svg>';
+const SKEL_PV = '<div role="status" aria-label="Consultando recorridos"><div class="skel t w80" style="margin:8px 0"></div><div class="skel w60" style="margin:8px 0"></div><div class="skel w40"></div></div>';
+const EMPTY_ILL = '<svg class="ill" viewBox="0 0 80 80" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="40" cy="42" r="24"/><path class="ac" d="M40 28v15l9 6" stroke="currentColor"/><path d="M14 18l8-6M66 18l-8-6"/></svg>';
+const vibrar = (ms = 10) => { try { navigator.vibrate?.(ms); } catch { /* sin soporte */ } };
 const guardar = () => localStorage.setItem(LS_R, JSON.stringify(rutinas));
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random().toString(16).slice(2));
 
@@ -67,24 +72,24 @@ function drawLista() {
   const { esc } = ctx;
   const cards = rutinas.map((r) => {
     const dias = r.dias.length === 7 ? 'Todos los días' : r.dias.length === 5 && !r.dias.includes(0) && !r.dias.includes(6) ? 'Lunes a viernes' : [...r.dias].sort().map((d) => DIAS[d]).join(' · ') || 'Sin días';
-    return `<div class="rcard ${r.activa ? '' : 'off'}" data-id="${esc(r.id)}">
-      <div class="rtop"><div class="rinfo"><b>${esc(r.nombre)}</b><span>${dias} · llegar a las <b>${esc(r.llegada)}</b></span><span>a ${esc(r.destino.nombre)}</span></div>
-        <label class="switch" title="Activar o pausar"><input type="checkbox" data-act ${r.activa ? 'checked' : ''}><i></i></label></div>
-      <div class="ract"><button class="chip" data-prev>Ver recomendación</button><button class="chip" data-edit>Editar</button><button class="chip del" data-del>Borrar</button></div>
-      <div class="rprev" hidden></div>
+    return `<div class="rcard ${r.activa ? '' : 'off'}" data-id="${esc(r.id)}" role="listitem">
+      <div class="rtop"><div class="rinfo"><b title="${esc(r.nombre)}">${esc(r.nombre)}</b><span>${dias} · llegar a las <b>${esc(r.llegada)}</b></span><span title="${esc(r.destino.nombre)}">a ${esc(r.destino.nombre)}</span></div>
+        <label class="switch" title="Activar o pausar"><input type="checkbox" data-act aria-label="Rutina ${esc(r.nombre)} activa" ${r.activa ? 'checked' : ''}><i></i></label></div>
+      <div class="ract"><button class="chip" data-prev aria-expanded="false">Ver recomendación</button><button class="chip" data-edit>Editar</button><button class="chip del" data-del aria-label="Borrar la rutina ${esc(r.nombre)}">Borrar</button></div>
+      <div class="rprev" hidden aria-live="polite"></div>
     </div>`;
   }).join('');
   ctx.content.innerHTML = `
     <div class="pushbox" id="pushbox"></div>
-    <div class="sec">Mis rutinas</div>
-    ${cards || `<div class="empty small">Todavía no tenés rutinas. Creá una con tu destino, los días que vas y a qué hora querés llegar: te aviso cuándo salir.</div>`}
-    <div class="gorow"><button class="btn go" id="nueva">＋ Nueva rutina</button></div>
+    <div class="sec" role="heading" aria-level="2">Mis rutinas</div>
+    ${cards ? `<div role="list">${cards}</div>` : `<div class="empty">${EMPTY_ILL}<h4>Todavía no tenés rutinas</h4><p>Creá una con tu destino, los días que vas y a qué hora querés llegar: te aviso cuándo salir.</p></div>`}
+    <div class="gorow"><button class="btn go" id="nueva">${SVG_PLUS} Nueva rutina</button></div>
     <div class="note pad">Avisos: 2 h antes de llegar (con la línea recomendada), 30 min y 15 min antes de que salga el colectivo.</div>`;
   pintarPush();
   ctx.content.querySelector<HTMLElement>('#nueva')!.onclick = () => { editando = null; vista = 'form'; drawForm(); };
   ctx.content.querySelectorAll<HTMLElement>('.rcard').forEach((el) => {
     const r = rutinas.find((x) => x.id === el.dataset.id)!;
-    el.querySelector<HTMLInputElement>('[data-act]')!.onchange = (e) => { r.activa = (e.target as HTMLInputElement).checked; guardar(); el.classList.toggle('off', !r.activa); subir(); };
+    el.querySelector<HTMLInputElement>('[data-act]')!.onchange = (e) => { vibrar(); r.activa =(e.target as HTMLInputElement).checked; guardar(); el.classList.toggle('off', !r.activa); subir(); };
     el.querySelector<HTMLElement>('[data-edit]')!.onclick = () => { editando = r; vista = 'form'; drawForm(); };
     el.querySelector<HTMLElement>('[data-del]')!.onclick = () => { if (confirm(`¿Borrar la rutina «${r.nombre}»?`)) { rutinas = rutinas.filter((x) => x !== r); guardar(); subir(); drawLista(); } };
     el.querySelector<HTMLElement>('[data-prev]')!.onclick = () => vistaPrevia(r, el.querySelector<HTMLElement>('.rprev')!);
@@ -112,7 +117,7 @@ function pintarPush() {
     <div class="note flat">Para saber dónde estás, la app le manda tu última ubicación al servidor <b>sólo mientras está abierta</b> (y sólo si lo activás en la rutina). Si no, usa el origen que guardes.</div></div>`;
   const inp = box.querySelector<HTMLInputElement>('#usuario')!;
   inp.onchange = () => { usuario = inp.value.trim(); localStorage.setItem(LS_U, usuario); subir(); };
-  const ocupado = (b: HTMLElement, t: string) => { b.setAttribute('disabled', ''); b.textContent = t; };
+  const ocupado = (b: HTMLElement, t: string) => { b.setAttribute('disabled', ''); b.setAttribute('aria-busy', 'true'); b.classList.add('loading'); b.setAttribute('aria-label', t); };
   const on = box.querySelector<HTMLElement>('#p-on');
   if (on) on.onclick = async () => {
     usuario = inp.value.trim(); localStorage.setItem(LS_U, usuario);
@@ -134,8 +139,10 @@ function pintarPush() {
 
 /* ---------------- Vista previa de los avisos ---------------- */
 async function vistaPrevia(r: Rutina, el: HTMLElement) {
-  if (!el.hidden) { el.hidden = true; return; }
-  el.hidden = false; el.innerHTML = '<div class="note flat">Consultando recorridos…</div>';
+  const btn = el.parentElement?.querySelector<HTMLElement>('[data-prev]');
+  if (!el.hidden) { el.hidden = true; btn?.setAttribute('aria-expanded', 'false'); return; }
+  btn?.setAttribute('aria-expanded', 'true');
+  el.hidden = false; el.innerHTML = SKEL_PV;
   try {
     const rutas = await planificar(r.origen, r.destino, undefined, 10);
     const prox = proximaLlegada(r, Date.now());
@@ -175,7 +182,7 @@ function drawForm() {
   let destino = r?.destino ?? null, origen = r?.origen ?? null;
   const dias = new Set<number>(r?.dias ?? [1, 2, 3, 4, 5]);
   ctx.content.innerHTML = `
-    <button class="row back" id="cancelar"><span class="iconbtn">‹</span><span class="main"><div class="t">${r ? 'Editar rutina' : 'Nueva rutina'}</div></span></button>
+    <button class="row back" id="cancelar"><span class="iconbtn" aria-hidden="true">${SVG_BACK}</span><span class="main"><div class="t">${r ? 'Editar rutina' : 'Nueva rutina'}</div></span></button>
     <form class="rform" id="rform" autocomplete="off">
       <label class="fld"><span>Nombre</span><input id="f-nombre" required maxlength="60" placeholder="Ej.: Trabajo, Facultad" value="${esc(r?.nombre ?? '')}"></label>
       <label class="fld"><span>¿A dónde vas?</span><input id="f-dest" required placeholder="Dirección, esquina o lugar" value="${esc(r?.destino.nombre ?? '')}"><div class="aclist" id="l-dest"></div></label>
@@ -183,12 +190,12 @@ function drawForm() {
       <label class="fld"><span>¿Desde dónde salís? (casa u origen fijo)</span><input id="f-orig" required placeholder="Tu dirección" value="${esc(r?.origen.nombre ?? '')}"><div class="aclist" id="l-orig"></div></label>
       <div id="lg-orig"></div>
       <label class="chk"><input type="checkbox" id="f-ubic" ${r?.usarUbicacion ? 'checked' : ''}><span>Usar mi ubicación actual cuando la app la conozca (si no, uso el origen de arriba)</span></label>
-      <div class="fld"><span>Días de la semana</span><div class="dchips">${[1, 2, 3, 4, 5, 6, 0].map((d) => `<button type="button" class="dchip" data-d="${d}" aria-pressed="${dias.has(d)}" title="${DIAS[d]}">${DIAS_L[d]}</button>`).join('')}</div></div>
+      <div class="fld"><span>Días de la semana</span><div class="dchips">${[1, 2, 3, 4, 5, 6, 0].map((d) => `<button type="button" class="dchip" data-d="${d}" aria-pressed="${dias.has(d)}" aria-label="${DIAS[d]}" title="${DIAS[d]}">${DIAS_L[d]}</button>`).join('')}</div></div>
       <div class="two">
         <label class="fld"><span>Quiero llegar a las</span><input id="f-hora" type="time" required value="${r?.llegada ?? '08:00'}"></label>
         <label class="fld"><span>Colchón</span><select id="f-margen">${[5, 10, 15, 20, 30].map((m) => `<option value="${m}" ${(r?.margen ?? 10) === m ? 'selected' : ''}>${m} min</option>`).join('')}</select></label>
       </div>
-      <div class="note flat bad" id="f-err" hidden></div>
+      <div class="note flat bad" id="f-err" role="alert" hidden></div>
       <button class="btn go" type="submit">Guardar rutina</button>
     </form>`;
   if (ctx.isMobile()) ctx.setFull();

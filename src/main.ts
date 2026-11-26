@@ -22,10 +22,14 @@ import { extras } from './viajeExtras'; // [viaje-extras]
 import { initShare, aplicarHash, shareBtns, syncLinea, syncViaje, syncTab, leaveLinea, guardarReciente, recientesHTML, bindRecientes } from './share'; // [share]
 import type { Pt } from './links'; // [share]
 
+import { toast, vibrar } from './toast';
+
 /* ------------------------------------------------------------------ utilidades */
 const $ = <T extends HTMLElement>(s: string) => document.querySelector(s) as T;
 const esc = (s: unknown) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
-const isMobile = () => matchMedia('(max-width: 760px)').matches;
+// Hoja inferior sólo en móvil vertical (en horizontal con poca altura se usa panel lateral, igual que en CSS).
+const isMobile = () => matchMedia('(max-width: 760px) and (orientation: portrait), (max-width: 760px) and (min-height: 501px)').matches;
+
 type LL = [number, number];
 
 const ICON = {
@@ -40,7 +44,50 @@ const ICON = {
   moon: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M20.5 14.6A8.6 8.6 0 0 1 9.4 3.5a.7.7 0 0 0-.9-.9A9.6 9.6 0 1 0 21.4 15.5a.7.7 0 0 0-.9-.9z"/></svg>',
   locate: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M21.4 2.6a.8.8 0 0 0-.85-.18L3 9.6a.8.8 0 0 0 .08 1.5l7.2 2.6 2.6 7.2a.8.8 0 0 0 1.5.08l7.2-17.5a.8.8 0 0 0-.18-.88z"/></svg>',
   pin: '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2a7 7 0 0 0-7 7c0 5 7 13 7 13s7-8 7-13a7 7 0 0 0-7-7zm0 9.5A2.5 2.5 0 1 1 12 6.5a2.5 2.5 0 0 1 0 5z"/></svg>',
+  destPin: '<svg width="34" height="34" viewBox="0 0 24 24"><path fill="currentColor" stroke="#fff" stroke-width="1.4" stroke-linejoin="round" d="M12 2a7 7 0 0 0-7 7c0 5 7 13 7 13s7-8 7-13a7 7 0 0 0-7-7z"/><circle cx="12" cy="9" r="2.6" fill="#fff"/></svg>',
+  chevSm: '<svg width="7" height="11" viewBox="0 0 8 14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m1.5 1.5 5 5.5-5 5.5"/></svg>',
+  navi: '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M21.4 2.6a.8.8 0 0 0-.85-.18L3 9.6a.8.8 0 0 0 .08 1.5l7.2 2.6 2.6 7.2a.8.8 0 0 0 1.5.08l7.2-17.5a.8.8 0 0 0-.18-.88z"/></svg>',
+  plus: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>',
 };
+
+/* ---- piezas de interfaz reutilizables ---- */
+const ARROW = `<span class="arrow" aria-hidden="true">${ICON.chevSm}</span>`;
+/** Avisa a lectores de pantalla (región aria-live del index.html). */
+function announce(msg: string) {
+  const el = document.getElementById('sr');
+  if (!el) return;
+  el.textContent = '';
+  setTimeout(() => (el.textContent = msg), 60);
+}
+/** Reinicia la animación corta de entrada al cambiar de pestaña o vista. */
+function enter(...els: HTMLElement[]) {
+  for (const el of els) { el.classList.remove('enter'); void el.offsetWidth; el.classList.add('enter'); }
+}
+const skelRows = (n = 6) => `<div role="status" aria-label="Cargando"><div class="vh">Cargando…</div>${Array.from({ length: n }, (_, i) => `<div class="skel-row" aria-hidden="true"><span class="skel b"></span><span class="ln"><span class="skel t w${i % 2 ? 60 : 80}"></span><span class="skel w${i % 2 ? 30 : 40}"></span></span></div>`).join('')}</div>`;
+const skelCards = (n = 3) => `<div role="status" aria-label="Buscando recorridos"><div class="vh">Buscando la mejor combinación de colectivos…</div>${Array.from({ length: n }, () => `<div class="skel-card" aria-hidden="true"><span class="skel big"></span><span class="legs"><span class="skel"></span><span class="skel"></span><span class="skel"></span></span><span class="skel w80"></span></div>`).join('')}<div class="sk-note" aria-hidden="true">Buscando la mejor combinación de colectivos…</div></div>`;
+const skelArr = () => `<div role="status" aria-label="Consultando arribos"><div class="vh">Consultando arribos…</div>${Array.from({ length: 3 }, () => `<div class="arr" aria-hidden="true"><span class="skel b"></span><span class="skel t w40"></span><span class="times"><span class="skel" style="width:46px;height:22px"></span><span class="skel" style="width:46px;height:22px"></span></span></div>`).join('')}</div>`;
+type Ill = 'buscar' | 'ruta' | 'red' | 'parada';
+const ILLS: Record<Ill, string> = {
+  buscar: '<circle cx="40" cy="40" r="20"/><path d="m56 56 16 16" stroke-width="5"/><path class="ac" d="M32 40h16" stroke="currentColor"/>',
+  ruta: '<circle cx="20" cy="64" r="7"/><path d="M27 64h24c9 0 9-16 18-16" stroke-dasharray="2 7"/><path class="ac" d="M68 22a9 9 0 0 0-9 9c0 8 9 20 9 20s9-12 9-20a9 9 0 0 0-9-9z" fill="currentColor" stroke="none"/><circle cx="68" cy="31" r="3" fill="var(--solid)" stroke="none"/><path d="m14 20 14 14M28 20 14 34" stroke-width="3.5"/>',
+  red: '<path d="M14 36c14-14 38-14 52 0M24 47c9-8 23-8 32 0M34 58c4-3 8-3 12 0"/><circle class="ac" cx="40" cy="67" r="2.6" fill="currentColor" stroke="none"/><path d="m16 16 48 48" stroke-width="5"/>',
+  parada: '<rect x="30" y="12" width="20" height="40" rx="4"/><path d="M40 52v22M28 74h24"/><path class="ac" d="M34 22h12M34 30h12" stroke="currentColor"/>',
+};
+const illus = (k: Ill) => `<svg class="ill" viewBox="0 0 80 80" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ILLS[k]}</svg>`;
+const emptyState = (k: Ill, titulo: string, texto: string, retry?: string) =>
+  `<div class="empty" role="status">${illus(k)}<h4>${esc(titulo)}</h4><p>${esc(texto)}</p>${retry ? `<button class="btn" data-retry>${retry}</button>` : ''}</div>`;
+/** Pone un botón en estado "cargando" (spinner) mientras dura una promesa. */
+async function busyBtn<T>(b: HTMLElement | null, p: () => Promise<T>): Promise<T> {
+  b?.classList.add('loading'); b?.setAttribute('aria-busy', 'true');
+  try { return await p(); } finally { b?.classList.remove('loading'); b?.removeAttribute('aria-busy'); }
+}
+/** Mensaje claro según el motivo por el que falló la geolocalización. */
+function avisoUbicacion(e: unknown, reintentar?: () => void) {
+  const code = (e as GeolocationPositionError | undefined)?.code;
+  if (code === 1) toast('Bloqueaste el permiso de ubicación. Habilitalo desde el candado de la barra de direcciones o escribí tu dirección.', { kind: 'error' });
+  else if (code === 3) toast('Tardó demasiado en ubicarte. Probá de nuevo, mejor al aire libre.', { kind: 'error', action: reintentar ? 'Reintentar' : undefined, onAction: reintentar });
+  else toast('No pude obtener tu ubicación en este momento. Escribí una dirección o probá de nuevo.', { kind: 'error', action: reintentar ? 'Reintentar' : undefined, onAction: reintentar });
+}
 
 /* ------------------------------------------------------------------ estado */
 let theme: Theme =
@@ -67,9 +114,10 @@ let origen: Campo = { texto: '' };
 let destino: Campo = { texto: '' };
 let rutas: Ruta[] | null = null;
 let planEstado: 'idle' | 'cargando' | 'error' | 'vacio' = 'idle';
+let resultsAnnounced = false;
 let orden: 'rapida' | 'caminata' | 'transbordos' = 'rapida';
 let rutaSel: Ruta | null = null;
-let sug: { campo: 'o' | 'd'; items: Lugar[]; cargando: boolean } | null = null;
+let sug: { campo: 'o' | 'd'; items: Lugar[]; cargando: boolean; error?: boolean } | null = null;
 const tripEta = new Map<number, string>();
 
 interface Anchor { routes: LL[][]; stop: LL; etaAt: number }
@@ -105,8 +153,12 @@ function arrowImage(): ImageData {
   const s = 32, c = document.createElement('canvas');
   c.width = c.height = s;
   const g = c.getContext('2d')!;
-  g.strokeStyle = '#fff'; g.lineWidth = 4.5; g.lineCap = 'round'; g.lineJoin = 'round';
-  g.beginPath(); g.moveTo(11, 8); g.lineTo(21, 16); g.lineTo(11, 24); g.stroke();
+  g.lineCap = 'round'; g.lineJoin = 'round';
+  // chevron fino blanco con un borde oscuro translúcido: se lee sobre cualquier color de línea
+  for (const [w, col] of [[6.5, 'rgba(0,0,0,0.28)'], [3.6, '#fff']] as const) {
+    g.strokeStyle = col; g.lineWidth = w;
+    g.beginPath(); g.moveTo(12, 9); g.lineTo(20.5, 16); g.lineTo(12, 23); g.stroke();
+  }
   return g.getImageData(0, 0, s, s);
 }
 
@@ -130,7 +182,7 @@ function installOverlays() {
   if (!map.hasImage('arrow')) map.addImage('arrow', arrowImage(), { pixelRatio: 2 });
   const dark = theme === 'dark';
   const c = accent();
-  const before = map.getLayer('road-label') ? 'road-label' : undefined;
+  const before = map.getLayer('road-label-major') ? 'road-label-major' : map.getLayer('road-label') ? 'road-label' : undefined;
 
   map.addSource('ida', { type: 'geojson', data: routeFC(linea?.ida ?? []) });
   map.addSource('vuelta', { type: 'geojson', data: routeFC(linea?.vuelta ?? []) });
@@ -143,13 +195,17 @@ function installOverlays() {
   const width = ['interpolate', ['exponential', 1.4], ['zoom'], 10, 2.2, 14, 4.5, 18, 9] as never;
   const cwidth = ['interpolate', ['exponential', 1.4], ['zoom'], 10, 4, 14, 7.5, 18, 14] as never;
 
+  const gwidth = ['interpolate', ['exponential', 1.4], ['zoom'], 10, 8, 14, 16, 18, 30] as never;
   for (const dir of ['vuelta', 'ida'] as const) {
+    // brillo suave (halo difuso) para que la línea seleccionada destaque sobre el mapa
+    map.addLayer({ id: `${dir}-glow`, type: 'line', source: dir, layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': c, 'line-width': gwidth, 'line-blur': 8, 'line-opacity': dark ? (dir === 'ida' ? 0.4 : 0.22) : (dir === 'ida' ? 0.3 : 0.16) } }, before);
     map.addLayer({ id: `${dir}-case`, type: 'line', source: dir, layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': casing, 'line-width': cwidth, 'line-opacity': dir === 'ida' ? 0.95 : 0.8 } }, before);
     map.addLayer({ id: `${dir}-line`, type: 'line', source: dir, layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': c, 'line-width': width, 'line-opacity': dir === 'ida' ? 1 : 0.62 } }, before);
     map.addLayer({ id: `${dir}-arrows`, type: 'symbol', source: dir, minzoom: 12.5, layout: { 'symbol-placement': 'line', 'symbol-spacing': 90, 'icon-image': 'arrow', 'icon-size': ['interpolate', ['linear'], ['zoom'], 12, 0.32, 17, 0.6], 'icon-allow-overlap': true, 'icon-ignore-placement': true } }, before);
   }
 
   // Viaje planificado: caminata punteada, colectivo con el color de su línea
+  map.addLayer({ id: 'trip-glow', type: 'line', source: 'trip', filter: ['==', ['get', 'kind'], 'bus'], layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': ['get', 'color'], 'line-width': gwidth, 'line-blur': 8, 'line-opacity': dark ? 0.4 : 0.3 } }, before);
   map.addLayer({ id: 'trip-case', type: 'line', source: 'trip', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': casing, 'line-width': ['interpolate', ['exponential', 1.4], ['zoom'], 10, 5, 14, 9, 18, 16], 'line-opacity': ['match', ['get', 'kind'], 'bus', 0.95, 0] } }, before);
   map.addLayer({ id: 'trip-bus', type: 'line', source: 'trip', filter: ['==', ['get', 'kind'], 'bus'], layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': ['get', 'color'], 'line-width': ['interpolate', ['exponential', 1.4], ['zoom'], 10, 3, 14, 5.5, 18, 10] } }, before);
   map.addLayer({ id: 'trip-walk', type: 'line', source: 'trip', filter: ['==', ['get', 'kind'], 'walk'], layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': dark ? '#7db9ff' : '#0a6cff', 'line-width': ['interpolate', ['linear'], ['zoom'], 12, 2.5, 17, 5], 'line-dasharray': [0.1, 2] } }, before);
@@ -164,9 +220,9 @@ function installOverlays() {
   });
   map.addLayer({ id: 'stops-sel', type: 'circle', source: 'stops', filter: ['==', ['get', 'id'], parada?.id ?? ''], paint: { 'circle-radius': 9, 'circle-color': c, 'circle-stroke-color': '#fff', 'circle-stroke-width': 3 } });
   map.addLayer({
-    id: 'stops-label', type: 'symbol', source: 'stops', minzoom: 15.6,
-    layout: { 'text-field': ['get', 'nombre'], 'text-font': ['Noto Sans Regular'], 'text-size': 11, 'text-offset': [0, 1.1], 'text-anchor': 'top', 'text-max-width': 9 },
-    paint: { 'text-color': dark ? '#e8e9ee' : '#2c2c30', 'text-halo-color': dark ? '#1b1c20' : '#ffffff', 'text-halo-width': 1.6 },
+    id: 'stops-label', type: 'symbol', source: 'stops', minzoom: 15.2,
+    layout: { 'text-field': ['get', 'nombre'], 'text-font': ['Noto Sans Bold'], 'text-size': ['interpolate', ['linear'], ['zoom'], 15, 10, 18, 12.5], 'text-offset': [0, 1.15], 'text-anchor': 'top', 'text-max-width': 8, 'text-optional': true },
+    paint: { 'text-color': dark ? '#f0f1f5' : '#25252a', 'text-halo-color': dark ? '#1b1c20' : '#ffffff', 'text-halo-width': 2, 'text-halo-blur': 0.4 },
   });
   map.addLayer({ id: 'trip-pts', type: 'circle', source: 'trip-pts', paint: { 'circle-radius': ['interpolate', ['linear'], ['zoom'], 12, 4, 17, 8], 'circle-color': dark ? '#1c1c1f' : '#ffffff', 'circle-stroke-color': ['get', 'color'], 'circle-stroke-width': 3 } });
 
@@ -191,7 +247,7 @@ map.on('zoomend', () => { if (busList.length) paintBuses(); });
 function applyDirection() {
   for (const d of ['ida', 'vuelta'] as const) {
     const on = direccion === 'ambas' || direccion === d;
-    for (const k of ['case', 'line', 'arrows']) if (map.getLayer(`${d}-${k}`)) map.setLayoutProperty(`${d}-${k}`, 'visibility', on ? 'visible' : 'none');
+    for (const k of ['glow', 'case', 'line', 'arrows']) if (map.getLayer(`${d}-${k}`)) map.setLayoutProperty(`${d}-${k}`, 'visibility', on ? 'visible' : 'none');
   }
 }
 
@@ -201,7 +257,7 @@ function refreshSources() {
   (map.getSource('stops') as GeoJSONSource | undefined)?.setData(stopsFC());
   if (map.getLayer('stops-sel')) map.setFilter('stops-sel', ['==', ['get', 'id'], parada?.id ?? '']);
   const c = accent();
-  for (const d of ['ida', 'vuelta']) if (map.getLayer(`${d}-line`)) map.setPaintProperty(`${d}-line`, 'line-color', c);
+  for (const d of ['ida', 'vuelta']) for (const k of ['line', 'glow']) if (map.getLayer(`${d}-${k}`)) map.setPaintProperty(`${d}-${k}`, 'line-color', c);
   if (map.getLayer('stops')) map.setPaintProperty('stops', 'circle-stroke-color', c);
   if (map.getLayer('stops-sel')) map.setPaintProperty('stops-sel', 'circle-color', c);
 }
@@ -209,7 +265,8 @@ function refreshSources() {
 /** Padding permanente: el mapa "ve" sólo la parte no tapada por el panel. */
 function panelPadding() {
   if (isMobile()) return { top: 0, left: 0, right: 0, bottom: Math.min(visible(snap), innerHeight * 0.5) };
-  return { top: 0, bottom: 0, right: 0, left: 392 + 14 * 2 };
+  const r = panel.getBoundingClientRect(); // el ancho del panel depende de la pantalla (tablet, escritorio ancho)
+  return { top: 0, bottom: 0, right: 0, left: Math.round(r.right + parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--gap') || '14')) };
 }
 const syncPadding = (animate = true) => (animate ? map.easeTo({ padding: panelPadding(), duration: 350 }) : map.setPadding(panelPadding()));
 
@@ -268,7 +325,8 @@ function locate(): Promise<LL> {
     );
   });
 }
-btnLoc.onclick = () => locate().then((ll) => map.flyTo({ center: ll, zoom: Math.max(map.getZoom(), 15.2), duration: 1000 })).catch(() => alert('No pude obtener tu ubicación. Revisá los permisos del navegador.'));
+const locateAndFly = () => busyBtn(btnLoc, () => locate().then((ll) => { vibrar(); map.flyTo({ center: ll, zoom: Math.max(map.getZoom(), 15.2), duration: 1000 }); }).catch((e) => avisoUbicacion(e, locateAndFly)));
+btnLoc.onclick = locateAndFly;
 
 /* ------------------------------------------------------------------ hoja móvil */
 const panel = $<HTMLElement>('#panel');
@@ -336,13 +394,22 @@ function renderHome() {
       <div class="brand-logo">${ICON.bus}</div>
       <div><h1>Viajo</h1><small>Colectivos de Rosario · ${index.length} líneas</small></div>
     </div>
-    <div class="seg tabs" role="tablist">
-      <button role="tab" data-t="viaje" aria-pressed="${tab === 'viaje'}">Planificar viaje</button>
-      <button role="tab" data-t="lineas" aria-pressed="${tab === 'lineas'}">Líneas</button>
-      <button role="tab" data-t="rutinas" aria-pressed="${tab === 'rutinas'}">Rutinas</button>
+    <div class="seg tabs" role="tablist" aria-label="Secciones">
+      ${([['viaje', 'Planificar viaje'], ['lineas', 'Líneas'], ['rutinas', 'Rutinas']] as const).map(([k, t]) =>
+        `<button role="tab" id="tab-${k}" data-t="${k}" aria-selected="${tab === k}" aria-controls="content" tabindex="${tab === k ? 0 : -1}">${t}</button>`).join('')}
     </div>
-    ${tab === 'viaje' ? plannerHTML() : tab === 'rutinas' ? '' : `<label class="search">${ICON.search}<input id="q" type="search" placeholder="Buscar línea (ej. 101, K, Costa)" autocomplete="off" value="${esc(filtro)}" /></label>`}`;
-  head.querySelectorAll<HTMLButtonElement>('[data-t]').forEach((b) => (b.onclick = () => { tab = b.dataset.t as typeof tab; sug = null; syncTab(tab) /* [share] */; renderHome(); }));
+    ${tab === 'viaje' ? plannerHTML() : tab === 'rutinas' ? '' : `<label class="search">${ICON.search}<input id="q" type="search" aria-label="Buscar línea" placeholder="Buscar línea (ej. 101, K, Costa)" autocomplete="off" enterkeyhint="search" value="${esc(filtro)}" /></label>`}`;
+  content.setAttribute('role', 'tabpanel'); content.setAttribute('aria-labelledby', `tab-${tab}`);
+  const tabs = [...head.querySelectorAll<HTMLButtonElement>('[data-t]')];
+  tabs.forEach((b, i) => {
+    b.onclick = () => { if (tab === b.dataset.t) return; tab = b.dataset.t as typeof tab; sug = null; vibrar(8); syncTab(tab) /* [share] */; renderHome(); enter(head, content); head.querySelector<HTMLElement>(`#tab-${tab}`)?.focus({ preventScroll: true }); };
+    b.onkeydown = (e) => {
+      const d = e.key === 'ArrowRight' ? 1 : e.key === 'ArrowLeft' ? -1 : e.key === 'Home' ? -99 : e.key === 'End' ? 99 : 0;
+      if (!d) return;
+      e.preventDefault();
+      tabs[Math.max(0, Math.min(tabs.length - 1, Math.abs(d) === 99 ? (d < 0 ? 0 : tabs.length - 1) : i + d))].click();
+    };
+  });
   if (tab === 'viaje') { bindPlanner(); drawTripContent(); }
   else if (tab === 'rutinas') {
     const ctx = { content, isMobile, setFull: () => setSnap('full'), esc };
@@ -360,24 +427,26 @@ function drawRows() {
   const rows = index
     .filter((l) => !t || norm(`${l.nombre} ${l.codigo} ${l.nombreCorto} ${l.empresa}`).includes(t))
     .sort((a, b) => empresaOrden(a.empresa) - empresaOrden(b.empresa) || num(a.codigo) - num(b.codigo) || a.nombre.localeCompare(b.nombre));
-  if (!rows.length) { content.innerHTML = `<div class="empty">No encontré ninguna línea con “${esc(filtro)}”.</div>`; return; }
+  if (!index.length) { content.innerHTML = skelRows(7); return; }
+  if (!rows.length) { content.innerHTML = emptyState('buscar', 'Sin resultados', `No encontré ninguna línea con “${filtro.trim()}”. Probá con el número (101), la letra (K) o parte del nombre.`); announce('Sin resultados'); return; }
   let html = '', cur = '';
   for (const l of rows) {
-    if (l.empresa !== cur) { cur = l.empresa; html += `<div class="sec">${esc(empresaNombre(cur))}</div>`; }
-    html += `<button class="row" data-f="${esc(l.file)}">${badge(l)}<span class="main"><div class="t">${esc(l.nombre)}</div><div class="s">${varianteDot(l.variante)}${VARIANTE[l.variante] ? ' · ' : ''}${l.paradas} paradas</div></span><span class="chev">${ICON.chev}</span></button>`;
+    if (l.empresa !== cur) { if (cur) html += '</ul>'; cur = l.empresa; html += `<div class="sec" role="heading" aria-level="2">${esc(empresaNombre(cur))}</div><ul>`; }
+    html += `<li><button class="row" data-f="${esc(l.file)}" aria-label="Línea ${esc(l.codigo)}, ${esc(l.nombre)}, ${l.paradas} paradas"><span aria-hidden="true" style="display:contents">${badge(l)}</span><span class="main"><div class="t" title="${esc(l.nombre)}">${esc(l.nombre)}</div><div class="s">${varianteDot(l.variante)}${VARIANTE[l.variante] ? ' · ' : ''}${l.paradas} paradas</div></span><span class="chev" aria-hidden="true">${ICON.chev}</span></button></li>`;
   }
-  content.innerHTML = html;
+  content.innerHTML = html + '</ul>';
   content.scrollTop = 0;
+  if (t) announce(`${rows.length} ${rows.length === 1 ? 'línea' : 'líneas'}`);
   content.querySelectorAll<HTMLButtonElement>('.row').forEach((b) => (b.onclick = () => openLinea(b.dataset.f!)));
 }
 
 /* ---------------- Planificador ---------------- */
 function plannerHTML() {
   return `<div class="plan">
-    <div class="rail"><i class="o"></i><i class="l"></i><i class="d">${ICON.pin}</i></div>
+    <div class="rail" aria-hidden="true"><i class="o"></i><i class="l"></i><i class="d">${ICON.pin}</i></div>
     <div class="fields">
-      <input id="in-o" type="text" placeholder="Tu dirección o lugar de salida" autocomplete="off" enterkeyhint="search" value="${esc(origen.texto)}" />
-      <input id="in-d" type="text" placeholder="¿A dónde vas?" autocomplete="off" enterkeyhint="go" value="${esc(destino.texto)}" />
+      <input id="in-o" type="text" aria-label="Salida: tu dirección o lugar" placeholder="Tu dirección o lugar de salida" autocomplete="off" enterkeyhint="search" value="${esc(origen.texto)}" />
+      <input id="in-d" type="text" aria-label="Destino" placeholder="¿A dónde vas?" autocomplete="off" enterkeyhint="go" value="${esc(destino.texto)}" />
     </div>
     <button class="iconbtn" id="swap" aria-label="Invertir origen y destino" title="Invertir">${ICON.swap}</button>
   </div>
@@ -417,7 +486,7 @@ async function onType(campo: 'o' | 'd', term: string) {
     sug = { campo, items: conGuardados(term, await buscarLugares(term, sugAbort.signal)), cargando: false }; // [lugares]
   } catch (e) {
     if ((e as Error).name === 'AbortError') return;
-    sug = { campo, items: coincidencias(term), cargando: false }; // [lugares]
+    sug = { campo, items: coincidencias(term), cargando: false, error: true }; // [lugares]
   }
   drawTripContent();
 }
@@ -439,7 +508,7 @@ async function useMyLocation() {
     $<HTMLInputElement>('#in-o').value = origen.texto;
     sug = null; refrescarChips(); // [lugares]
     if (destino.lng === undefined) $<HTMLInputElement>('#in-d').focus(); else tryPlan();
-  } catch { alert('No pude obtener tu ubicación. Revisá los permisos del navegador o escribí una dirección.'); }
+  } catch (e) { avisoUbicacion(e, useMyLocation); }
 }
 
 async function tryPlan() {
@@ -449,7 +518,7 @@ async function tryPlan() {
   syncViaje(); // [share]
   if (origen.lng === undefined || destino.lng === undefined) { rutas = null; planEstado = 'idle'; drawTripContent(); return; }
   planAbort?.abort(); planAbort = new AbortController();
-  planEstado = 'cargando'; rutas = null; drawTripContent();
+  planEstado = 'cargando'; rutas = null; resultsAnnounced = false; drawTripContent();
   if (isMobile()) setSnap('half');
   try {
     const r = await planificar({ lng: origen.lng, lat: origen.lat! }, { lng: destino.lng, lat: destino.lat! }, planAbort.signal);
@@ -459,6 +528,7 @@ async function tryPlan() {
   } catch (e) {
     if ((e as Error).name === 'AbortError') return;
     planEstado = 'error';
+    toast('No pude consultar el planificador. Revisá tu conexión.', { kind: 'error', action: 'Reintentar', onAction: tryPlan });
   }
   drawTripContent();
 }
@@ -478,9 +548,10 @@ function drawTripContent() {
   if (sug) {
     let html = '';
     if (sug.campo === 'o') html += `<button class="row sug" data-loc="1"><span class="sico loc">${ICON.locate.replace('<svg ', '<svg width="15" height="15" ')}</span><span class="main"><div class="t">Mi ubicación</div><div class="s">Usar el GPS del dispositivo</div></span></button>`;
-    html += sug.items.map((l, i) => `<button class="row sug" data-i="${i}"><span class="sico">${ICON.pin}</span><span class="main"><div class="t">${esc(l.nombre)}</div><div class="s">${esc(l.detalle)}</div></span></button>`).join('');
-    if (sug.cargando) html += `<div class="empty small">Buscando…</div>`;
-    else if (!sug.items.length) html += `<div class="empty small">${(sug.campo === 'o' ? origen : destino).texto.trim().length < 3 ? 'Escribí una dirección (“Córdoba 1500”), una esquina (“Corrientes y Córdoba”) o un lugar.' : 'Sin resultados. Probá con calle y altura o una esquina.'}</div>`;
+    html += sug.items.map((l, i) => `<button class="row sug" data-i="${i}"><span class="sico">${ICON.pin}</span><span class="main"><div class="t" title="${esc(l.nombre)}">${esc(l.nombre)}</div><div class="s" title="${esc(l.detalle)}">${esc(l.detalle)}</div></span></button>`).join('');
+    if (sug.cargando) html += `<div role="status" aria-label="Buscando lugares">${skelRows(3).replace(/<div role="status"[^>]*>/, '<div>')}</div>`;
+    else if (sug.error) html += `<div class="empty small bad" role="alert">No pude buscar lugares. Revisá tu conexión y seguí escribiendo.</div>`;
+    else if (!sug.items.length) html += `<div class="empty small" role="status">${(sug.campo === 'o' ? origen : destino).texto.trim().length < 3 ? 'Escribí una dirección (“Córdoba 1500”), una esquina (“Corrientes y Córdoba”) o un lugar.' : 'Sin resultados. Probá con calle y altura o una esquina.'}</div>`;
     content.innerHTML = html;
     const s = sug;
     content.querySelector<HTMLElement>('[data-loc]')?.addEventListener('pointerdown', (e) => { e.preventDefault(); useMyLocation(); });
@@ -490,16 +561,22 @@ function drawTripContent() {
   // 2) detalle de una alternativa
   if (rutaSel) { drawDetalle(rutaSel); return; }
   // 3) estados / resultados
-  if (planEstado === 'cargando') { content.innerHTML = `<div class="empty"><div class="spin"></div>Buscando la mejor combinación de colectivos…</div>`; return; }
-  if (planEstado === 'error') { content.innerHTML = `<div class="empty">No pude consultar el planificador. Revisá tu conexión e intentá de nuevo.<br><button class="btn" id="retry">Reintentar</button></div>`; $('#retry').onclick = tryPlan; return; }
-  if (planEstado === 'vacio') { content.innerHTML = `<div class="empty">No encontré recorridos en colectivo entre esos dos puntos. Probá con otras direcciones.</div>`; return; }
+  if (planEstado === 'cargando') { content.innerHTML = skelCards(3); return; }
+  if (planEstado === 'error') {
+    content.innerHTML = emptyState('red', 'No pude buscar recorridos', 'Revisá tu conexión e intentá de nuevo.', 'Reintentar');
+    const rb = content.querySelector<HTMLElement>('[data-retry]')!;
+    rb.onclick = () => busyBtn(rb, async () => { await tryPlan(); });
+    return;
+  }
+  if (planEstado === 'vacio') { content.innerHTML = emptyState('ruta', 'Sin recorridos en colectivo', 'No encontré cómo ir entre esos dos puntos. Probá con otra dirección o una esquina cercana a una avenida.'); return; }
   if (rutas) {
     const list = ordenadas();
     const fast = Math.min(...rutas.map((r) => r.dur));
     const chips = ([['rapida', 'Más rápida'], ['caminata', 'Menos caminata'], ['transbordos', 'Menos transbordos']] as const)
       .map(([k, t]) => `<button class="chip" data-o="${k}" aria-pressed="${orden === k}">${t}</button>`).join('');
-    content.innerHTML = `<div class="chips-row">${chips}</div>` + list.map((r, i) => tripCard(r, r.dur === fast, i)).join('') +
-      `<div class="note pad">Recorridos y tiempos calculados con el planificador oficial de Cómo Llego, desde ahora. Pueden variar según el tránsito.</div>`;
+    content.innerHTML = `<div class="chips-row" role="group" aria-label="Ordenar alternativas">${chips}</div><ul>` + list.map((r, i) => `<li>${tripCard(r, r.dur === fast, i)}</li>`).join('') +
+      `</ul><div class="note pad">Recorridos y tiempos calculados con el planificador oficial de Cómo Llego, desde ahora. Pueden variar según el tránsito.</div>`;
+    if (!resultsAnnounced) { announce(`${list.length} ${list.length === 1 ? 'alternativa encontrada' : 'alternativas encontradas'}. La más rápida tarda ${fmtDur(fast)}.`); resultsAnnounced = true; }
     content.querySelectorAll<HTMLElement>('[data-o]').forEach((b) => (b.onclick = () => { orden = b.dataset.o as typeof orden; drawTripContent(); }));
     content.querySelectorAll<HTMLElement>('.trip').forEach((b) => (b.onclick = () => selectRuta(list[+b.dataset.r!])));
     return;
@@ -507,7 +584,7 @@ function drawTripContent() {
   // 4) vacío inicial
   if (cercaDetalle(cercaCtx)) return; // [cerca]
   content.innerHTML = `<div class="empty hello">
-    <div class="hello-ico">${ICON.bus.replace('width="17" height="17"', 'width="28" height="28"')}</div>
+    <div class="hello-ico" aria-hidden="true">${ICON.bus.replace('width="17" height="17"', 'width="28" height="28"')}</div>
     <b>¿A dónde vamos?</b>
     <p>Poné tu dirección y a dónde querés ir. Te muestro la parada más cercana, qué colectivo tomar y cuánto tardás.</p>
     <button class="btn" id="use-loc">${ICON.locate.replace('<svg ', '<svg width="14" height="14" ')} Usar mi ubicación como salida</button>
@@ -530,12 +607,13 @@ function abrirViaje(o: Pt, d: Pt) {
 
 function tripCard(r: Ruta, best: boolean, i: number): string {
   const parts = r.tramos.map((t, k) => {
-    const sep = k ? `<span class="arrow">›</span>` : '';
-    if (t.modo === 'walk') return `${sep}<span class="wk">${ICON.walk}${Math.max(1, Math.round(t.dur / 60))}′</span>`;
+    const sep = k ? ARROW : '';
+    if (t.modo === 'walk') return `${sep}<span class="wk" title="Caminata">${ICON.walk}${Math.max(1, Math.round(t.dur / 60))}′</span>`;
     return `${sep}${badge({ codigo: t.linea!.codigo }, false, true)}`;
   }).join('');
+  const lineasTxt = r.tramos.filter((t) => t.modo === 'bus').map((t) => `línea ${t.linea!.codigo}`).join(', ');
   const trans = r.transbordos === 0 ? 'Sin transbordos' : r.transbordos === 1 ? '1 transbordo' : `${r.transbordos} transbordos`;
-  return `<button class="trip" data-r="${i}">
+  return `<button class="trip" data-r="${i}" aria-label="Alternativa ${i + 1}: ${fmtDur(r.dur)}, ${esc(lineasTxt)}, ${trans}. Ver detalle">
     <div class="tt"><b>${fmtDur(r.dur)}</b>${best ? '<em>Más rápida</em>' : ''}<span>${r.inicio} → ${r.fin}</span></div>
     <div class="legs">${parts}</div>
     <div class="ts">${trans} · caminás ${fmtDist(r.caminata)} · ${fmtDist(r.dist)} en total</div>
@@ -550,17 +628,18 @@ function drawDetalle(r: Ruta) {
       return `<button class="step" data-leg="${i}"><span class="sico walk">${ICON.walk.replace('width="14" height="14"', 'width="16" height="16"')}</span><span class="main"><div class="t">Caminá ${fmtDur(t.dur)} <span class="mut">(${fmtDist(t.dist)})</span></div><div class="s">${desdeOrigen ? 'Hasta la parada ' : 'Hasta '}<b>${esc(hasta)}</b></div></span><span class="hr">${t.inicio}</span></button>`;
     }
     const eta = tripEta.get(i);
-    return `<button class="step" data-leg="${i}">${badge({ codigo: t.linea!.codigo }, false, true)}<span class="main"><div class="t">Tomá el ${esc(t.linea!.nombre)}</div><div class="s">Subí en <b>${esc(t.desde.nombre)}</b><br>Bajá en <b>${esc(t.hasta.nombre)}</b> · ${fmtDur(t.dur)}</div>${eta ? `<div class="eta">${eta}</div>` : ''}</span><span class="hr">${t.inicio}</span></button>`;
+    const etaHtml = eta ? `<div class="eta">${eta}</div>` : etaLoading && t.desde.parada ? `<div class="skel w60" role="status" aria-label="Consultando próximos arribos"></div>` : '';
+    return `<button class="step" data-leg="${i}">${badge({ codigo: t.linea!.codigo }, false, true)}<span class="main"><div class="t">Tomá el ${esc(t.linea!.nombre)}</div><div class="s">Subí en <b>${esc(t.desde.nombre)}</b><br>Bajá en <b>${esc(t.hasta.nombre)}</b> · ${fmtDur(t.dur)}</div>${etaHtml}</span><span class="hr">${t.inicio}</span></button>`;
   }).join('');
   content.innerHTML = `
-    <button class="row back" id="back-res"><span class="iconbtn">${ICON.back}</span><span class="main"><div class="t">Alternativas</div></span></button>
+    <button class="row back" id="back-res"><span class="iconbtn" aria-hidden="true">${ICON.back}</span><span class="main"><div class="t">Alternativas</div></span></button>
     <div class="card sum"><b>${fmtDur(r.dur)}</b><span>${r.inicio} → ${r.fin}</span>
       <div class="s">${r.transbordos === 0 ? 'Sin transbordos' : r.transbordos + (r.transbordos === 1 ? ' transbordo' : ' transbordos')} · caminás ${fmtDist(r.caminata)}</div></div>
-    <div class="gorow"><button class="btn go" id="go-viaje">Iniciar viaje</button>${shareBtns('viaje')}</div>
-    <div class="steps">${steps}<div class="step end"><span class="sico dest">${ICON.pin}</span><span class="main"><div class="t">Llegás a tu destino</div><div class="s">${esc(destino.texto)}</div></span><span class="hr">${r.fin}</span></div></div>
+    <div class="gorow"><button class="btn go" id="go-viaje">${ICON.navi} Iniciar viaje</button>${shareBtns('viaje')}</div>
+    <div class="steps">${steps}<div class="step end"><span class="sico dest">${ICON.pin}</span><span class="main"><div class="t">Llegás a tu destino</div><div class="s" title="${esc(destino.texto)}">${esc(destino.texto)}</div></span><span class="hr">${r.fin}</span></div></div>
     <div class="note pad">Los colectivos en 3D son una <b>estimación</b> de dónde viene el próximo, según los arribos en vivo.</div>`;
-  $('#back-res').onclick = () => { rutaSel = null; clearTripMap(); clearBuses(); drawTripContent(); fitPoints([[origen.lng!, origen.lat!], [destino.lng!, destino.lat!]], 15.2); };
-  $('#go-viaje').onclick = () => startViaje(r);
+  $('#back-res').onclick = () => { rutaSel = null; clearTripMap(); clearBuses(); drawTripContent(); enter(content); fitPoints([[origen.lng!, origen.lat!], [destino.lng!, destino.lat!]], 15.2); };
+  $('#go-viaje').onclick = () => { vibrar(15); startViaje(r); };
   content.querySelectorAll<HTMLElement>('[data-leg]').forEach((b) => (b.onclick = () => fitPoints(r.tramos[+b.dataset.leg!].geom, 16.5)));
 }
 
@@ -573,7 +652,7 @@ function placeEndpoints() {
     oMarker = new maplibregl.Marker({ element: el }).setLngLat([origen.lng, origen.lat!]).addTo(map);
   }
   if (destino.lng !== undefined) {
-    const el = document.createElement('div'); el.className = 'dest-pin'; el.innerHTML = ICON.pin.replace('width="16" height="16"', 'width="34" height="34"');
+    const el = document.createElement('div'); el.className = 'dest-pin'; el.setAttribute('aria-hidden', 'true'); el.innerHTML = ICON.destPin;
     dMarker = new maplibregl.Marker({ element: el, anchor: 'bottom' }).setLngLat([destino.lng, destino.lat!]).addTo(map);
   }
 }
@@ -603,9 +682,11 @@ function drawTrip(r: Ruta, fit = true) {
   if (fit) fitPoints(r.tramos.flatMap((t) => t.geom), 16);
 }
 
+let etaLoading = false;
 async function selectRuta(r: Ruta) {
-  rutaSel = r; tripEta.clear(); clearBuses();
-  drawTrip(r); drawTripContent();
+  rutaSel = r; tripEta.clear(); clearBuses(); etaLoading = true;
+  vibrar(8);
+  drawTrip(r); drawTripContent(); enter(content);
   if (isMobile()) setSnap('half');
   // Próximos colectivos en cada subida: arribos en vivo + posición estimada en 3D
   const tasks = r.tramos.map(async (t, i) => {
@@ -635,6 +716,7 @@ async function selectRuta(r: Ruta) {
     } catch (e) { console.warn('arribos del tramo', e); }
   });
   await Promise.allSettled(tasks);
+  if (rutaSel === r) etaLoading = false;
   if (rutaSel === r && !sug) drawDetalle(r);
 }
 
@@ -647,6 +729,7 @@ interface Viaje {
   timer: number; fin: boolean; gpsError: boolean; busy: boolean; preview: Ruta | null;
 }
 let viaje: Viaje | null = null;
+let lastAviso = '';
 const hhmm = (ms: number) => new Date(ms).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', hour12: false });
 const lineaCache = new Map<string, Promise<Linea | null>>();
 const lineaDe = (id: string, emp: string) => {
@@ -668,12 +751,13 @@ function startViaje(r: Ruta) {
   if (navigator.geolocation) {
     v.watch = navigator.geolocation.watchPosition(
       (p) => onPos([p.coords.longitude, p.coords.latitude]),
-      () => { v.gpsError = true; if (v.watch !== null) navigator.geolocation.clearWatch(v.watch); v.watch = null; renderViaje(true); },
+      (err) => { v.gpsError = true; if (v.watch !== null) navigator.geolocation.clearWatch(v.watch); v.watch = null; renderViaje(true); toast(err.code === 1 ? 'Sin permiso de ubicación: avanzá los pasos con los botones “Ya llegué / Ya subí / Ya bajé”.' : 'Perdí la señal de GPS: avanzá los pasos con los botones.', { kind: 'error' }); },
       { enableHighAccuracy: true, maximumAge: 4000, timeout: 20000 },
     );
   } else v.gpsError = true;
   v.timer = window.setInterval(pollViaje, 20000);
-  renderViaje();
+  renderViaje(); enter(head, content);
+  announce('Viaje iniciado');
   pollViaje();
   if (isMobile()) setSnap('half');
 }
@@ -695,16 +779,17 @@ function stopViaje(redraw = true) {
   clearInterval(v.timer);
   if (v.watch !== null) navigator.geolocation.clearWatch(v.watch);
   viaje = null; clearBuses();
-  if (redraw) { renderHome(); if (rutaSel) drawTrip(rutaSel, false); }
+  if (redraw) { renderHome(); enter(head, content); if (rutaSel) drawTrip(rutaSel, false); }
 }
 
 function avanzar() {
   const v = viaje;
   if (!v) return;
   v.i++; v.abordo = false; v.etaBoard = null; v.etaAlight = null; v.preview = null;
-  if (v.i >= v.ruta.tramos.length) { v.fin = true; clearBuses(); }
-  else pollViaje();
+  if (v.i >= v.ruta.tramos.length) { v.fin = true; clearBuses(); vibrar([30, 50, 30, 50, 60]); }
+  else { pollViaje(); vibrar([25, 40, 25]); }
   renderViaje(true);
+  announce(instruccion(v).titulo);
 }
 
 function onPos(ll: LL) {
@@ -854,28 +939,31 @@ function renderViaje(soft = false) {
   const t = v.ruta.tramos[Math.min(v.i, v.ruta.tramos.length - 1)];
 
   head.innerHTML = `
-    <div class="vhead"><div class="vt"><small>Viaje en curso</small><b>Hacia ${esc(destino.texto)}</b></div>
-      ${v.fin ? '' : shareBtns('eta', true)}<button class="btn sm danger" id="fin-viaje">Terminar</button></div>
-    <div class="vprog">${v.ruta.tramos.map((x, k) => `<i class="${k < v.i || v.fin ? 'done' : k === v.i ? 'cur' : ''} ${x.modo}"></i>`).join('')}</div>`;
+    <div class="vhead"><div class="vt"><small>Viaje en curso</small><b title="${esc(destino.texto)}">Hacia ${esc(destino.texto)}</b></div>
+      ${v.fin ? '' : shareBtns('eta', true)}<button class="btn sm danger" id="fin-viaje" aria-label="Terminar el viaje">Terminar</button></div>
+    <div class="vprog" role="progressbar" aria-label="Avance del viaje" aria-valuemin="0" aria-valuemax="${v.ruta.tramos.length}" aria-valuenow="${Math.min(v.i, v.ruta.tramos.length)}">${v.ruta.tramos.map((x, k) => `<i class="${k < v.i || v.fin ? 'done' : k === v.i ? 'cur' : ''} ${x.modo}"></i>`).join('')}</div>`;
+  content.removeAttribute('role'); content.removeAttribute('aria-labelledby');
 
   // aviso principal: atraso / mejor opción / al mismo tiempo
   const mejor = v.alts[0];
   const atraso = !v.abordo && v.etaBoard !== null && v.delayMs !== 0 ? Math.round(v.delayMs / 60000) : 0;
   let aviso = '';
   if (!v.fin && !v.abordo) {
-    if (mejor && mejor.delta <= -3) aviso = `<div class="banner better"><b>Hay una opción mejor</b>Llegás ${-mejor.delta} min antes con ${esc(mejor.ruta.denom)}${mejor.ruta.caminata > v.ruta.caminata + 50 ? ` (caminás ${fmtDist(mejor.ruta.caminata - v.ruta.caminata)} más)` : ''}.</div>`;
-    else if (atraso >= 4) aviso = `<div class="banner warn"><b>Tu colectivo viene ~${atraso} min atrasado</b>${mejor ? 'Mirá las alternativas de abajo.' : 'No encontré una alternativa mejor por ahora.'}</div>`;
-    else if (v.alts.some((a) => Math.abs(a.delta) <= 3)) aviso = `<div class="banner same"><b>Al mismo tiempo</b>Hay otras opciones que llegan casi a la misma hora (±3 min) si preferís no esperar.</div>`;
-    else if (v.replanned) aviso = `<div class="banner ok"><b>Tu ruta sigue siendo la mejor</b>La revisé hace instantes con datos en vivo.</div>`;
+    if (mejor && mejor.delta <= -3) aviso = `<div class="banner better" role="status"><b>Hay una opción mejor</b>Llegás ${-mejor.delta} min antes con ${esc(mejor.ruta.denom)}${mejor.ruta.caminata > v.ruta.caminata + 50 ? ` (caminás ${fmtDist(mejor.ruta.caminata - v.ruta.caminata)} más)` : ''}.</div>`;
+    else if (atraso >= 4) aviso = `<div class="banner warn" role="alert"><b>Tu colectivo viene ~${atraso} min atrasado</b>${mejor ? 'Mirá las alternativas de abajo.' : 'No encontré una alternativa mejor por ahora.'}</div>`;
+    else if (v.alts.some((a) => Math.abs(a.delta) <= 3)) aviso = `<div class="banner same" role="status"><b>Al mismo tiempo</b>Hay otras opciones que llegan casi a la misma hora (±3 min) si preferís no esperar.</div>`;
+    else if (v.replanned) aviso = `<div class="banner ok" role="status"><b>Tu ruta sigue siendo la mejor</b>La revisé hace instantes con datos en vivo.</div>`;
   }
 
+  // el aviso se re-dibuja con cada actualización de GPS: sólo se anuncia (role) cuando cambia
+  if (aviso === lastAviso) aviso = aviso.replace(/ role="\w+"/, ''); else lastAviso = aviso;
   const accion = v.fin ? '' : t.modo === 'walk' ? `<button class="btn" id="v-next">Ya llegué</button>` : !v.abordo ? `<button class="btn" id="v-next">Ya subí</button>` : `<button class="btn" id="v-next">Ya bajé</button>`;
 
   const alts = v.alts.length && !v.abordo && !v.fin ? `<div class="sec">Otras opciones ahora</div>` + v.alts.map((a, k) => {
     const tag = Math.abs(a.delta) <= 3 ? '<em class="tg same">Al mismo tiempo</em>' : a.delta < 0 ? `<em class="tg good">${-a.delta} min antes</em>` : `<em class="tg late">${a.delta} min más tarde</em>`;
     const extra = a.ruta.caminata - v.ruta.caminata;
-    const lines = a.ruta.tramos.map((x, j) => (x.modo === 'walk' ? `${j ? '<span class="arrow">›</span>' : ''}<span class="wk">${ICON.walk}${Math.max(1, Math.round(x.dur / 60))}′</span>` : `${j ? '<span class="arrow">›</span>' : ''}${badge({ codigo: x.linea!.codigo }, false, true)}`)).join('');
-    return `<div class="alt ${v.preview === a.ruta ? 'on' : ''}" data-a="${k}">
+    const lines = a.ruta.tramos.map((x, j) => (x.modo === 'walk' ? `${j ? ARROW : ''}<span class="wk" title="Caminata">${ICON.walk}${Math.max(1, Math.round(x.dur / 60))}′</span>` : `${j ? ARROW : ''}${badge({ codigo: x.linea!.codigo }, false, true)}`)).join('');
+    return `<div class="alt ${v.preview === a.ruta ? 'on' : ''}" data-a="${k}" role="button" tabindex="0" aria-pressed="${v.preview === a.ruta}">
       <div class="tt"><b>Llegás ${hhmm(a.ruta.finMs)}</b>${tag}</div>
       <div class="legs">${lines}</div>
       <div class="ts">${fmtDur(a.ruta.dur)} · caminás ${fmtDist(a.ruta.caminata)}${Math.abs(extra) > 50 ? ` (${extra > 0 ? '+' : '−'}${fmtDist(Math.abs(extra))} que tu ruta)` : ''}</div>
@@ -910,23 +998,27 @@ function renderViaje(soft = false) {
   $('#fin-viaje').onclick = () => stopViaje();
   extras.bindPanel(content); // [viaje-extras]
   document.getElementById('v-next')?.addEventListener('click', () => {
-    if (t.modo === 'bus' && !v.abordo) { v.abordo = true; v.etaAlight = null; mostrarMiBus(); renderViaje(true); pollViaje(); }
+    if (t.modo === 'bus' && !v.abordo) { vibrar(20); v.abordo = true; v.etaAlight = null; mostrarMiBus(); renderViaje(true); pollViaje(); }
     else avanzar();
   });
-  content.querySelectorAll<HTMLElement>('[data-a]').forEach((el) => (el.onclick = (e) => {
-    if ((e.target as HTMLElement).closest('[data-take]')) return;
-    const a = v.alts[+el.dataset.a!];
-    v.preview = v.preview === a.ruta ? null : a.ruta;
-    drawTrip(v.preview ?? v.ruta, true);
-    renderViaje(true);
-  }));
+  content.querySelectorAll<HTMLElement>('[data-a]').forEach((el) => {
+    el.onclick = (e) => {
+      if ((e.target as HTMLElement).closest('[data-take]')) return;
+      const a = v.alts[+el.dataset.a!];
+      v.preview = v.preview === a.ruta ? null : a.ruta;
+      drawTrip(v.preview ?? v.ruta, true);
+      renderViaje(true);
+      content.querySelector<HTMLElement>(`[data-a="${el.dataset.a}"]`)?.focus({ preventScroll: true });
+    };
+    el.onkeydown = (e) => { if (e.target === el && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); el.click(); } };
+  });
   content.querySelectorAll<HTMLElement>('[data-take]').forEach((b) => (b.onclick = () => cambiarRuta(v.alts[+b.dataset.take!].ruta)));
   if (soft) content.scrollTop = st;
 }
 
 /* ---------------- Colectivos (3D + etiqueta) ---------------- */
 function paintBuses() {
-  busFC = { type: 'FeatureCollection', features: busFeatures(busList, map.getZoom()) };
+  busFC = { type: 'FeatureCollection', features: busFeatures(busList, map.getZoom(), theme === 'dark' ? '#0b0b0d' : '#8b8b93') };
   (map.getSource('buses3d') as GeoJSONSource | undefined)?.setData(busFC);
 }
 function syncBusMarkers() {
@@ -962,15 +1054,16 @@ function renderLinea() {
   const l = linea!;
   head.innerHTML = `
     <div class="lhead">
-      <button class="iconbtn" id="back" aria-label="Volver">${ICON.back}</button>
+      <button class="iconbtn" id="back" aria-label="Volver a la lista" title="Volver (Esc)">${ICON.back}</button>
       ${badge(l, true)}
-      <div class="info"><b>${esc(l.nombre)}</b><span>${esc(empresaNombre(l.empresa))} · ${l.stops.length} paradas</span></div>
+      <div class="info"><b title="${esc(l.nombre)}">${esc(l.nombre)}</b><span title="${esc(empresaNombre(l.empresa))}">${esc(empresaNombre(l.empresa))} · ${l.stops.length} paradas</span></div>
       ${shareBtns('linea', true)}
     </div>
-    <div class="seg" role="group" aria-label="Sentido">
+    <div class="seg" role="group" aria-label="Sentido del recorrido">
       ${(['ida', 'vuelta', 'ambas'] as const).map((d) => `<button data-d="${d}" aria-pressed="${direccion === d}">${d[0].toUpperCase() + d.slice(1)}</button>`).join('')}
     </div>
     <div class="live" id="live"></div>`;
+  content.removeAttribute('role'); content.removeAttribute('aria-labelledby');
   $('#back').onclick = closeLinea;
   head.querySelectorAll<HTMLButtonElement>('[data-d]').forEach((b) => (b.onclick = () => { direccion = b.dataset.d as typeof direccion; applyDirection(); renderLinea(); }));
   drawLive();
@@ -981,8 +1074,8 @@ function drawLive() {
   const el = document.getElementById('live');
   if (!el) return;
   el.classList.toggle('on', liveState.n > 0 || liveState.eta > 0);
-  el.innerHTML = `<span class="pulse"></span><span>${
-    !liveState.checked ? 'Consultando estado del servicio…'
+  el.innerHTML = `<span class="pulse" aria-hidden="true"></span><span>${
+    !liveState.checked ? '<span class="skel w60" style="display:inline-block;width:180px;vertical-align:middle"></span> <span class="vh">Consultando estado del servicio…</span>'
     : liveState.n ? `<b>${liveState.n} ${liveState.n === 1 ? 'colectivo' : 'colectivos'}</b> en el mapa · posición estimada, se mueve en vivo <span class="ago">· actualizado hace ${Math.max(0, Math.round((Date.now() - liveState.when) / 1000))} s</span>`
     : liveState.eta ? `<b>Servicio con GPS</b> · arribos actualizados en vivo <span class="ago">· hace ${Math.max(0, Math.round((Date.now() - liveState.when) / 1000))} s</span>`
     : 'Sin datos de GPS ahora · se muestran horarios programados'}</span>`;
@@ -1017,24 +1110,23 @@ function stopCard(): string {
   if (!parada) return '';
   let body: string;
   if (paradaError) body = estaOffline() // [pwa]
-    ? `<div class="note">Sin conexión · los arribos en vivo no están disponibles. Se retoman solos cuando vuelva internet.</div>`
-    : `<div class="note">No se pudieron cargar los arribos. Reintentando…</div>`;
-  else if (!paradaData) body = `<div class="note">Consultando arribos…</div>`;
-  else if (!paradaData.length) body = `<div class="note">No hay arribos informados para esta parada.</div>`;
+    ? `<div class="note flat" role="status">Sin conexión · los arribos en vivo no están disponibles. Se retoman solos cuando vuelva internet.</div>`
+    : `<div class="note flat" role="alert"><span class="bad"><b>No pude cargar los arribos.</b></span> Se reintenta solo cada 30 s.</div><button class="btn sm" data-retry-stop>Reintentar ahora</button>`;
+  else if (!paradaData) body = skelArr();
+  else if (!paradaData.length) body = `<div class="note flat" role="status">No hay arribos informados para esta parada en este momento.</div>`;
   else {
     const mine = (x: ArriboLinea) => !!linea && x.linea.id === linea.id && x.linea.idEmpresa === linea.idEmpresa;
     const sorted = [...paradaData].sort((a, b) => Number(mine(b)) - Number(mine(a)));
-    body = frecuenciaResumen(sorted.find(mine)) + sorted.map((x) => {
+    body = frecuenciaResumen(sorted.find(mine)) + '<ul class="arrs">' + sorted.map((x) => {
       const idx = idxOf(x.linea.id, x.linea.idEmpresa);
       const bd = badge({ codigo: x.linea.codigoEMR || x.linea.nombreCorto });
       const times = x.arribos.slice(0, 3).map(fmtArribo).join('') || '<span class="pill prog">—</span>';
       const f = frecuencia(x.arribos);
-      return `<div class="arr ${mine(x) ? 'me' : ''}">${idx && !mine(x) ? `<button class="badge-btn" data-f="${esc(idx.file)}" style="display:contents">${bd}</button>` : bd}<span class="nm"><span style="font-size:13px;font-weight:${mine(x) ? 650 : 500}">${esc(x.linea.nombre)}</span>${f ? `<small class="fq">cada ~${f} min</small>` : ''}</span><span class="times">${times}</span></div>`;
-    }).join('') + `<div class="note"><span class="pill live" style="font-size:11px;padding:1px 6px">en vivo</span> con GPS · <span class="pill prog" style="font-size:11px;padding:1px 6px">hora</span> programado</div>`;
-  }
-  return `<div class="card">
-    <div class="top"><div><h3>${esc(parada.nombre)}</h3><div class="sub">${esc(parada.desc || 'Parada')} · próximos arribos</div></div>
-    ${shareBtns('parada', true)}<button class="iconbtn" id="close-stop" aria-label="Cerrar parada">${ICON.close}</button></div>${body}</div>`;
+      return `<li class="arr ${mine(x) ? 'me' : ''}">${idx && !mine(x) ? `<button class="badge-btn" data-f="${esc(idx.file)}" aria-label="Abrir la línea ${esc(x.linea.nombre)}">${bd}</button>` : bd}<span class="nm"><span title="${esc(x.linea.nombre)}" style="font-weight:${mine(x) ? 650 : 500}">${esc(x.linea.nombre)}</span>${f ? `<small class="fq">cada ~${f} min</small>` : ''}</span><span class="times">${times}</span></li>`;
+    }).join('') + `</ul><div class="note"><span class="pill live mini">en vivo</span> con GPS · <span class="pill prog mini">hora</span> programado</div>`;  }
+  return `<div class="card" role="region" aria-label="Parada ${esc(parada.nombre)}">
+    <div class="top"><div><h3 title="${esc(parada.nombre)}">${esc(parada.nombre)}</h3><div class="sub">${esc(parada.desc || 'Parada')} · próximos arribos</div></div>
+    ${shareBtns('parada', true)}<button class="iconbtn" id="close-stop" aria-label="Cerrar parada" title="Cerrar (Esc)">${ICON.close}</button></div>${body}</div>`;
 }
 
 /** Sólo repinta la tarjeta de la parada (se refresca cada 30 s) sin reconstruir las ~190 filas de paradas. */
@@ -1044,29 +1136,34 @@ function drawStopCard() {
   host.innerHTML = stopCard();
   host.querySelectorAll<HTMLElement>('[data-f]').forEach((b) => (b.onclick = () => openLinea(b.dataset.f!)));
   document.getElementById('close-stop')?.addEventListener('click', clearStop);
+  document.querySelector<HTMLElement>('[data-retry-stop]')?.addEventListener('click', (e) => busyBtn(e.currentTarget as HTMLElement, async () => { await reloadStop?.(); }));
 }
 
 function drawBody() {
   if (!linea) return;
   const c = lineColor(linea.codigo, theme);
-  const list = linea.stops.map((p) => `<button class="stop ${parada?.id === p.id ? 'sel' : ''}" data-s="${esc(p.id)}" style="--c:${c}"><span class="pin"></span><span><div class="n">${esc(p.nombre)}</div>${p.desc ? `<div class="d">${esc(p.desc)}</div>` : ''}</span></button>`).join('');
-  content.innerHTML = `<div id="stopcard">${stopCard()}</div><div class="sec">Paradas</div>${list}`;
-  content.querySelectorAll<HTMLButtonElement>('.stop').forEach((b) => (b.onclick = () => { const p = linea!.stops.find((s) => s.id === b.dataset.s); if (p) selectStop(p, true); }));
+  const list = linea.stops.map((p) => `<li><button class="stop ${parada?.id === p.id ? 'sel' : ''}" data-s="${esc(p.id)}" style="--c:${c}" aria-current="${parada?.id === p.id}"><span class="pin" aria-hidden="true"></span><span class="tx"><div class="n" title="${esc(p.nombre)}">${esc(p.nombre)}</div>${p.desc ? `<div class="d" title="${esc(p.desc)}">${esc(p.desc)}</div>` : ''}</span></button></li>`).join('');
+  content.innerHTML = `<div id="stopcard">${stopCard()}</div><div class="sec" role="heading" aria-level="2">Paradas</div><ul>${list}</ul>`;
+  content.querySelectorAll<HTMLButtonElement>('.stop').forEach((b) => (b.onclick = () => { const p = linea!.stops.find((s) => s.id === b.dataset.s); if (p) { selectStop(p, true); (content.querySelector(`.stop[data-s="${CSS.escape(p.id)}"]`) as HTMLElement | null)?.focus({ preventScroll: true }); } }));
   content.querySelectorAll<HTMLElement>('[data-f]').forEach((b) => (b.onclick = () => openLinea(b.dataset.f!)));
   document.getElementById('close-stop')?.addEventListener('click', clearStop);
+  document.querySelector<HTMLElement>('[data-retry-stop]')?.addEventListener('click', (e) => busyBtn(e.currentTarget as HTMLElement, async () => { await reloadStop?.(); }));
   decorarParadas(content, linea.stops, parada); // [cerca]
 }
 
 let openSeq = 0;
 async function openLinea(file: string, stopId?: string) {
   const seq = ++openSeq;
-  const l = await loadLinea(file);
+  let l: Linea;
+  try { l = await loadLinea(file); }
+  catch { if (seq === openSeq) toast('No pude cargar esa línea. Revisá tu conexión.', { kind: 'error', action: 'Reintentar', onAction: () => openLinea(file, stopId) }); return; }
   if (seq !== openSeq) return; // se pidió otra línea mientras cargaba
   linea = l; parada = null; paradaData = null; direccion = 'ambas';
   stopLive(); clearBuses(); clearTripMap(); oMarker?.remove(); dMarker?.remove();
   liveState = { n: 0, eta: 0, checked: false, when: 0 };
   refreshSources(); fitLinea();
-  renderLinea();
+  renderLinea(); enter(head, content);
+  announce(`Línea ${l.codigo}: ${l.nombre}`);
   if (isMobile()) setSnap('half');
   syncLinea(file); // [share]
   startLive();
@@ -1078,12 +1175,14 @@ function closeLinea() {
   stopLive(); clearBuses(); clearInterval(stopTimer);
   refreshSources();
   leaveLinea(); // [share]
-  renderHome();
+  renderHome(); enter(head, content);
   placeEndpoints();
   if (rutaSel) drawTrip(rutaSel, false);
 }
 
+let reloadStop: (() => Promise<void>) | null = null;
 function selectStop(p: Parada, fly: boolean) {
+  vibrar(8);
   parada = p; paradaData = null; paradaError = false;
   if (linea) syncLinea(linea.file, p.id); // [share]
   if (map.getLayer('stops-sel')) map.setFilter('stops-sel', ['==', ['get', 'id'], p.id]);
@@ -1096,6 +1195,7 @@ function selectStop(p: Parada, fly: boolean) {
     try { paradaData = await arribos(p.id); paradaError = false; } catch { paradaError = true; }
     if (parada?.id === p.id) drawStopCard();
   };
+  reloadStop = load;
   load();
   clearInterval(stopTimer);
   stopTimer = window.setInterval(load, 30000);
@@ -1163,8 +1263,10 @@ async function pollLive() {
     ...reuseKeys(estUniq, busList, 'e').map((e) => ({ ...e, estimado: true })),
   ];
   setBuses(nuevos.map((e) => ({ ...e, codigo: l.codigo, color })));
+  const antes = liveState.checked ? liveState.n : -1;
   liveState = { n: nuevos.length, eta, checked: true, when: Date.now() };
   drawLive();
+  if (antes !== liveState.n) announce(liveState.n ? `${liveState.n} ${liveState.n === 1 ? 'colectivo' : 'colectivos'} en el mapa` : 'Sin colectivos con GPS por ahora');
 }
 function startLive() { stopLive(); pollLive(); liveTimer = window.setInterval(pollLive, 20000); }
 function stopLive() { clearInterval(liveTimer); liveAbort?.abort(); liveAbort = null; }
@@ -1207,8 +1309,29 @@ const cercaCtx: CercaCtx = {
 // [/cerca]
 
 /* ------------------------------------------------------------------ arranque */
-(async () => {
-  index = await loadIndex();
+/** Escape cierra lo último que se abrió: parada → línea → detalle de recorrido. */
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape' || e.defaultPrevented || viaje) return;
+  if ((e.target as HTMLElement | null)?.closest('input, select, textarea')) return;
+  if (linea) { if (parada) clearStop(); else closeLinea(); }
+  else if (rutaSel && tab === 'viaje') { rutaSel = null; clearTripMap(); clearBuses(); drawTripContent(); enter(content); }
+  else return;
+  e.preventDefault();
+});
+addEventListener('offline', () => toast('Sin conexión. Los arribos en vivo se actualizan cuando vuelvas a tener internet.', { kind: 'error', duration: 5000 }));
+addEventListener('online', () => { toast('Volvió la conexión.', { kind: 'ok', duration: 2500 }); if (linea) pollLive(); });
+
+async function arrancar() {
+  head.innerHTML = `<div class="brand"><div class="brand-logo" aria-hidden="true">${ICON.bus}</div><div><h1>Viajo</h1><small>Colectivos de Rosario</small></div></div>`;
+  content.innerHTML = skelRows(7);
+  setSnap('half');
+  try { index = await loadIndex(); }
+  catch {
+    content.innerHTML = emptyState('red', 'No pude cargar las líneas', 'Revisá tu conexión e intentá de nuevo.', 'Reintentar');
+    const b = content.querySelector<HTMLElement>('[data-retry]')!;
+    b.onclick = () => busyBtn(b, arrancar);
+    return;
+  }
   setSnap('half');
   if (location.hash === '#rutinas') tab = 'rutinas'; // viene de tocar una notificación
   else if (location.hash === '#lineas') tab = 'lineas'; // [pwa] atajos del manifest (#viaje es la pestaña por defecto)
@@ -1231,6 +1354,7 @@ const cercaCtx: CercaCtx = {
     fileDe: (id, emp) => idxOf(id, emp)?.file,
   });
   aplicarHash();
-})();
+}
+arrancar();
 
 (window as unknown as Record<string, unknown>).__viajo = { map, openLinea, selectRuta, pick, get rutas() { return rutas; }, get buses() { return busList; }, startViaje, onPos, get viaje() { return viaje; } };

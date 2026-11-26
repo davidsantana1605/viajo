@@ -107,7 +107,7 @@ export const busScale = (zoom: number) => Math.min(12, Math.max(1.3, 2 ** (18.2 
 
 const L = 6, W = 1.275; // medio largo y medio ancho (12 m × 2,55 m)
 
-export function busFeatures(buses: (Est & { color: string })[], zoom: number): GeoJSON.Feature[] {
+export function busFeatures(buses: (Est & { color: string })[], zoom: number, shadow = '#8a8a92'): GeoJSON.Feature[] {
   const s = busScale(zoom);
   const out: GeoJSON.Feature[] = [];
   for (const bus of buses) {
@@ -115,6 +115,9 @@ export function busFeatures(buses: (Est & { color: string })[], zoom: number): G
     const part = (pts: [number, number][], color: string, base: number, top: number) =>
       out.push({ type: 'Feature', properties: { c: color, b: base * s, h: top * s }, geometry: { type: 'Polygon', coordinates: [local(c, bus.heading, s, pts)] } });
     const GLASS = '#1c2a40', DARK = '#16171a', WHITE = '#eef0f3';
+
+    // sombra proyectada simple: huella más grande y desplazada hacia atrás/derecha, casi a ras del suelo
+    part(rect(-L - 0.5, L + 0.3, -W - 0.5, W + 0.9, 1.2, 1.0), shadow, 0, 0.08);
 
     part(rect(-L + 0.2, L - 0.2, -W + 0.15, W - 0.15, 0.4, 0.2), DARK, 0.25, 0.9); // zócalo / chasis
     part(rect(-L, L, -W, W, 0.7, 0.3), bus.color, 0.9, 1.45); // carrocería inferior
