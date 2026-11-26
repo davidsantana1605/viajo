@@ -14,6 +14,9 @@ import { planificar, type Ruta } from './trip';
 import { estimate, dedupe, headingNear, busFeatures, dist, type Est } from './bus3d';
 import { norm, fmtDur, fmtDist, fmtMin, frecuencia } from './util';
 import { initPWA, estaOffline } from './pwa'; // [pwa]
+// [cerca]
+import { montarCerca, cercaDetalle, cercaOcultar, decorarParadas, type CercaCtx } from './cerca';
+// [/cerca]
 
 /* ------------------------------------------------------------------ utilidades */
 const $ = <T extends HTMLElement>(s: string) => document.querySelector(s) as T;
@@ -322,6 +325,7 @@ function render() {
 
 /* ---------------- Inicio: pestañas Viaje / Líneas ---------------- */
 function renderHome() {
+  if (tab !== 'viaje') cercaOcultar(); // [cerca]
   if (viaje) { renderViaje(); return; }
   head.innerHTML = `
     <div class="brand">
@@ -429,6 +433,7 @@ async function useMyLocation() {
 }
 
 async function tryPlan() {
+  cercaOcultar(); // [cerca]
   rutaSel = null; clearTripMap(); clearBuses();
   placeEndpoints();
   if (origen.lng === undefined || destino.lng === undefined) { rutas = null; planEstado = 'idle'; drawTripContent(); return; }
@@ -488,6 +493,7 @@ function drawTripContent() {
     return;
   }
   // 4) vacío inicial
+  if (cercaDetalle(cercaCtx)) return; // [cerca]
   content.innerHTML = `<div class="empty hello">
     <div class="hello-ico">${ICON.bus.replace('width="17" height="17"', 'width="28" height="28"')}</div>
     <b>¿A dónde vamos?</b>
@@ -495,6 +501,7 @@ function drawTripContent() {
     <button class="btn" id="use-loc">${ICON.locate.replace('<svg ', '<svg width="14" height="14" ')} Usar mi ubicación como salida</button>
   </div>`;
   $('#use-loc').onclick = useMyLocation;
+  montarCerca(cercaCtx); // [cerca]
 }
 
 function tripCard(r: Ruta, best: boolean, i: number): string {
@@ -911,6 +918,7 @@ function recolorBuses() {
 
 /* ---------------- Vista de línea ---------------- */
 function renderLinea() {
+  cercaOcultar(); // [cerca]
   const l = linea!;
   head.innerHTML = `
     <div class="lhead">
@@ -1005,6 +1013,7 @@ function drawBody() {
   content.querySelectorAll<HTMLButtonElement>('.stop').forEach((b) => (b.onclick = () => { const p = linea!.stops.find((s) => s.id === b.dataset.s); if (p) selectStop(p, true); }));
   content.querySelectorAll<HTMLElement>('[data-f]').forEach((b) => (b.onclick = () => openLinea(b.dataset.f!)));
   document.getElementById('close-stop')?.addEventListener('click', clearStop);
+  decorarParadas(content, linea.stops, parada); // [cerca]
 }
 
 let openSeq = 0;
@@ -1135,6 +1144,24 @@ function tick() {
 }
 // El timer sigue siendo de 1 s, pero el trabajo se agenda en un frame (y se omite con la pestaña oculta).
 setInterval(() => { if (!document.hidden && !tickRaf) tickRaf = requestAnimationFrame(tick); }, 1000);
+
+/* ------------------------------------------------------------------ [cerca] enganche de "Cerca de vos" + favoritas */
+const cercaCtx: CercaCtx = {
+  content, map, esc, badge,
+  locate: () => locate(),
+  openLinea: (file, stopId) => { openLinea(file, stopId); },
+  verMapa: () => { if (isMobile() && snap === 'full') setSnap('half'); },
+  redibujar: () => drawTripContent(),
+  planear: async (o, d) => {
+    try {
+      const me = async () => { const [lng, lat] = await locate(); return { texto: 'Mi ubicación', lng, lat }; };
+      origen = o ?? (await me());
+      destino = d ?? (await me());
+    } catch { alert('No pude obtener tu ubicación. Revisá los permisos del navegador o escribí una dirección.'); return; }
+    tab = 'viaje'; sug = null; renderHome(); tryPlan();
+  },
+};
+// [/cerca]
 
 /* ------------------------------------------------------------------ arranque */
 (async () => {
