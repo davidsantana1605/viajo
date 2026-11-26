@@ -6,7 +6,7 @@ import {
   type Rutina, type Reco, type Aviso, type Fecha,
 } from '../../src/recomendar';
 
-interface Env {
+export interface Env {
   DB: KVNamespace;
   VAPID_PUBLIC_KEY: string;
   VAPID_PRIVATE_KEY: string;
@@ -72,14 +72,18 @@ function lugar(v: unknown) {
 function limpiarRutinas(v: unknown): Rutina[] {
   if (!Array.isArray(v)) return [];
   const out: Rutina[] = [];
+  const vistos = new Set<string>();
   for (const x of v.slice(0, MAX_RUTINAS)) {
     const o = (x ?? {}) as Record<string, unknown>;
     const destino = lugar(o.destino), origen = lugar(o.origen);
     const llegada = str(o.llegada, 5);
     if (!destino || !origen || !/^([01]\d|2[0-3]):[0-5]\d$/.test(llegada)) continue;
     const dias = Array.isArray(o.dias) ? [...new Set((o.dias as unknown[]).filter((d): d is number => Number.isInteger(d) && (d as number) >= 0 && (d as number) <= 6))] : [];
+    let id = str(o.id, 40);
+    if (!id || vistos.has(id)) id = crypto.randomUUID(); // ids repetidos pisarían el estado de la otra rutina
+    vistos.add(id);
     out.push({
-      id: str(o.id, 40) || crypto.randomUUID(), nombre: str(o.nombre, 60) || 'Rutina', destino, origen,
+      id, nombre: str(o.nombre, 60) || 'Rutina', destino, origen,
       usarUbicacion: o.usarUbicacion === true, dias, llegada, margen: num(o.margen, 0, 60) ?? 10, activa: o.activa !== false,
     });
   }
@@ -93,10 +97,42 @@ const leerSub = async (env: Env, id: string): Promise<Sub | null> => {
 const guardarSub = (env: Env, s: Sub) => env.DB.put(`s:${s.id}`, JSON.stringify(s));
 const leerIdx = async (env: Env): Promise<string[]> => JSON.parse((await env.DB.get('idx')) ?? '[]');
 
+/** Parte de la rutina que invalida lo ya calculado del día (si cambia, la recomendación vieja ya no sirve). */
+const cfgKey = (r: Rutina) => JSON.stringify([r.llegada, r.margen, r.origen, r.destino, r.usarUbicacion]);
+
+/**
+ * Índice liviano 'win': por suscripción, los (días, llegada) de sus rutinas activas. Permite que el cron de cada
+ * minuto lea SÓLO las suscripciones con una ventana abierta (el plan gratis limita las lecturas de KV por
+ * invocación y por día). Si falta una entrada (suscripción anterior a este índice) se lee la suscripción igual.
+ */
+type Win = Record<string, { d: number[]; l: string }[]>;
+const leerWin = async (env: Env): Promise<Win> => { try { return JSON.parse((await env.DB.get('win')) ?? '{}') as Win; } catch { return {}; } };
+const ventanasDe = (rutinas: Rutina[]) => rutinas.filter((r) => r.activa && r.dias.length).map((r) => ({ d: r.dias, l: r.llegada }));
+async function actualizarWin(env: Env, id: string, rutinas: Rutina[] | null) {
+  const w = await leerWin(env);
+  if (rutinas) w[id] = ventanasDe(rutinas); else delete w[id];
+  await env.DB.put('win', JSON.stringify(w));
+}
+
 async function borrarSub(env: Env, id: string) {
   const idx = (await leerIdx(env)).filter((x) => x !== id);
   await env.DB.put('idx', JSON.stringify(idx));
   await env.DB.delete(`s:${id}`);
+  await actualizarWin(env, id, null);
+}
+
+/** Ventana de avisos de una rutina: desde 125 min antes de la llegada hasta 5 min después (hoy o mañana, hora de Rosario). */
+function fechasEnVentana(dias: number[], llegada: string, now: number): { f: Fecha; A: number }[] {
+  const hoy = rosario(now);
+  const out: { f: Fecha; A: number }[] = [];
+  for (const off of [0, 1]) {
+    const t = new Date(Date.UTC(hoy.y, hoy.m - 1, hoy.d + off));
+    if (!dias.includes(t.getUTCDay())) continue;
+    const f: Fecha = { y: t.getUTCFullYear(), m: t.getUTCMonth() + 1, d: t.getUTCDate() };
+    const A = aMs(f, llegada);
+    if (now >= A - 125 * 60_000 && now <= A + 5 * 60_000) out.push({ f, A });
+  }
+  return out;
 }
 
 /* ---------------- API ---------------- */
@@ -109,6 +145,7 @@ async function manejar(req: Request, env: Env, ctx: ExecutionContext): Promise<R
 
   if (url.pathname === '/debug/tick' && env.DEBUG === '1') {
     const now = url.searchParams.get('now') ? new Date(url.searchParams.get('now')!).getTime() : Date.now();
+    if (!Number.isFinite(now)) return json({ error: 'now inválido' }, 400, cors);
     return json(await tick(env, now, url.searchParams.get('dry') !== '0'), 200, cors);
   }
 
@@ -117,8 +154,12 @@ async function manejar(req: Request, env: Env, ctx: ExecutionContext): Promise<R
   if (origin && !cors['access-control-allow-origin']) return json({ error: 'origen no permitido' }, 403, cors);
   const len = Number(req.headers.get('content-length') ?? 0);
   if (len > MAX_BODY) return json({ error: 'cuerpo demasiado grande' }, 413, cors);
+  // Sin content-length (chunked) el encabezado no sirve: se mide el cuerpo real.
+  const crudo = await req.text();
+  if (crudo.length > MAX_BODY) return json({ error: 'cuerpo demasiado grande' }, 413, cors);
   let body: Record<string, unknown>;
-  try { body = (await req.json()) as Record<string, unknown>; } catch { return json({ error: 'JSON inválido' }, 400, cors); }
+  try { body = JSON.parse(crudo) as Record<string, unknown>; } catch { return json({ error: 'JSON inválido' }, 400, cors); }
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return json({ error: 'JSON inválido' }, 400, cors);
 
   if (url.pathname === '/sync') {
     const s = (body.subscription ?? {}) as { endpoint?: string; keys?: { p256dh?: string; auth?: string } };
@@ -133,7 +174,11 @@ async function manejar(req: Request, env: Env, ctx: ExecutionContext): Promise<R
     const previo = await leerSub(env, id);
     const rutinas = limpiarRutinas(body.rutinas);
     const estado: Sub['estado'] = {};
-    for (const r of rutinas) if (previo?.estado[r.id]) estado[r.id] = previo.estado[r.id]; // conserva lo ya calculado hoy
+    // conserva lo ya calculado hoy, salvo que la rutina haya cambiado (hora, margen, lugares): ahí se recalcula
+    for (const r of rutinas) {
+      const antes = previo?.rutinas.find((x) => x.id === r.id);
+      if (previo?.estado[r.id] && antes && cfgKey(antes) === cfgKey(r)) estado[r.id] = previo.estado[r.id];
+    }
     const loc = lugar(body.loc);
     const sub: Sub = {
       id, sub: { endpoint: s.endpoint, expirationTime: null, keys: { p256dh: s.keys.p256dh, auth: s.keys.auth } },
@@ -141,6 +186,7 @@ async function manejar(req: Request, env: Env, ctx: ExecutionContext): Promise<R
       loc: loc ? { lng: loc.lng, lat: loc.lat, ts: Date.now() } : previo?.loc,
     };
     await guardarSub(env, sub);
+    await actualizarWin(env, id, rutinas);
     return json({ ok: true, rutinas: rutinas.length }, 200, cors);
   }
 
@@ -214,21 +260,20 @@ async function calcular(sub: Sub, r: Rutina, llegadaMs: number, now: number): Pr
  */
 export async function tick(env: Env, now: number, dry: boolean): Promise<Evento[]> {
   const eventos: Evento[] = [];
-  const hoy = rosario(now);
+  const win = await leerWin(env);
   for (const id of await leerIdx(env)) {
+    // sin ventana abierta no se lee la suscripción (ahorra lecturas de KV y CPU con muchas suscripciones)
+    const w = win[id];
+    if (w && !w.some((x) => fechasEnVentana(x.d, x.l, now).length)) continue;
     const sub = await leerSub(env, id);
     if (!sub) continue;
-    let cambiado = false;
+    let cambiado = false, gone = false;
     for (const r of sub.rutinas) {
+      if (gone) break;
       if (!r.activa || !r.dias.length) continue;
       // hoy y mañana: una llegada a las 00:30 se avisa desde las 22:30 del día anterior
-      for (const off of [0, 1]) {
-        const t = new Date(Date.UTC(hoy.y, hoy.m - 1, hoy.d + off));
-        if (!r.dias.includes(t.getUTCDay())) continue;
-        const f: Fecha = { y: t.getUTCFullYear(), m: t.getUTCMonth() + 1, d: t.getUTCDate() };
-        const A = aMs(f, r.llegada), key = `${r.id}`;
-        if (now < A - 125 * 60_000 || now > A + 5 * 60_000) continue;
-
+      for (const { f, A } of fechasEnVentana(r.dias, r.llegada, now)) {
+        const key = `${r.id}`;
         let st = sub.estado[key];
         if (!st || st.fecha !== fechaKey(f)) {
           // todavía no hay recomendación de ese día: se calcula una vez entrada la ventana de 2 h
@@ -254,17 +299,35 @@ export async function tick(env: Env, now: number, dry: boolean): Promise<Evento[
           if (!dry) {
             const res = await enviar(env, sub, { ...msg, tag: `${r.id}-${aviso}` });
             enviado = res === 'ok'; detalle = res;
-            if (res === 'gone') { await borrarSub(env, id); eventos.push({ sub: id, rutina: r.nombre, aviso, ...msg, enviado, detalle }); return eventos; }
+            st.enviados[aviso] = now; cambiado = true;
+            if (res === 'gone') gone = true;
           }
-          if (!dry) { st.enviados[aviso] = now; cambiado = true; }
           eventos.push({ sub: id, rutina: r.nombre, aviso, ...msg, enviado, detalle });
+          if (gone) break;
         }
         sub.estado[key] = st;
+        if (gone) break;
       }
     }
+    if (dry) continue; // el modo de prueba no deja rastro en KV (ni intentos ni avisos marcados)
+    if (gone) { await borrarSub(env, id); continue; } // una suscripción caída no frena a las demás
     // limpia estados de días pasados
     for (const [k, v] of Object.entries(sub.estado)) if (v.llegadaMs < now - 24 * 3600_000) { delete sub.estado[k]; cambiado = true; }
-    if (cambiado) await guardarSub(env, sub);
+    if (cambiado) {
+      // El usuario pudo sincronizar (o darse de baja) mientras se calculaba: se parte de lo último guardado y sólo se
+      // vuelca el estado de las rutinas que no cambiaron, así no se pisan sus cambios ni se resucita una suscripción borrada.
+      const fresca = await leerSub(env, id);
+      if (!fresca) continue;
+      const estado: Sub['estado'] = {};
+      for (const r of fresca.rutinas) {
+        const mia = sub.rutinas.find((x) => x.id === r.id);
+        if (sub.estado[r.id] && mia && cfgKey(mia) === cfgKey(r)) estado[r.id] = sub.estado[r.id];
+        else if (fresca.estado[r.id]) estado[r.id] = fresca.estado[r.id];
+      }
+      for (const [k, v] of Object.entries(estado)) if (v.llegadaMs < now - 24 * 3600_000) delete estado[k];
+      fresca.estado = estado;
+      await guardarSub(env, fresca);
+    }
   }
   return eventos;
 }
