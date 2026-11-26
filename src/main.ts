@@ -145,8 +145,12 @@ function arrowImage(): ImageData {
   const s = 32, c = document.createElement('canvas');
   c.width = c.height = s;
   const g = c.getContext('2d')!;
-  g.strokeStyle = '#fff'; g.lineWidth = 4.5; g.lineCap = 'round'; g.lineJoin = 'round';
-  g.beginPath(); g.moveTo(11, 8); g.lineTo(21, 16); g.lineTo(11, 24); g.stroke();
+  g.lineCap = 'round'; g.lineJoin = 'round';
+  // chevron fino blanco con un borde oscuro translúcido: se lee sobre cualquier color de línea
+  for (const [w, col] of [[6.5, 'rgba(0,0,0,0.28)'], [3.6, '#fff']] as const) {
+    g.strokeStyle = col; g.lineWidth = w;
+    g.beginPath(); g.moveTo(12, 9); g.lineTo(20.5, 16); g.lineTo(12, 23); g.stroke();
+  }
   return g.getImageData(0, 0, s, s);
 }
 
@@ -170,7 +174,7 @@ function installOverlays() {
   if (!map.hasImage('arrow')) map.addImage('arrow', arrowImage(), { pixelRatio: 2 });
   const dark = theme === 'dark';
   const c = accent();
-  const before = map.getLayer('road-label') ? 'road-label' : undefined;
+  const before = map.getLayer('road-label-major') ? 'road-label-major' : map.getLayer('road-label') ? 'road-label' : undefined;
 
   map.addSource('ida', { type: 'geojson', data: routeFC(linea?.ida ?? []) });
   map.addSource('vuelta', { type: 'geojson', data: routeFC(linea?.vuelta ?? []) });
@@ -183,13 +187,17 @@ function installOverlays() {
   const width = ['interpolate', ['exponential', 1.4], ['zoom'], 10, 2.2, 14, 4.5, 18, 9] as never;
   const cwidth = ['interpolate', ['exponential', 1.4], ['zoom'], 10, 4, 14, 7.5, 18, 14] as never;
 
+  const gwidth = ['interpolate', ['exponential', 1.4], ['zoom'], 10, 8, 14, 16, 18, 30] as never;
   for (const dir of ['vuelta', 'ida'] as const) {
+    // brillo suave (halo difuso) para que la línea seleccionada destaque sobre el mapa
+    map.addLayer({ id: `${dir}-glow`, type: 'line', source: dir, layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': c, 'line-width': gwidth, 'line-blur': 8, 'line-opacity': dark ? (dir === 'ida' ? 0.4 : 0.22) : (dir === 'ida' ? 0.3 : 0.16) } }, before);
     map.addLayer({ id: `${dir}-case`, type: 'line', source: dir, layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': casing, 'line-width': cwidth, 'line-opacity': dir === 'ida' ? 0.95 : 0.8 } }, before);
     map.addLayer({ id: `${dir}-line`, type: 'line', source: dir, layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': c, 'line-width': width, 'line-opacity': dir === 'ida' ? 1 : 0.62 } }, before);
     map.addLayer({ id: `${dir}-arrows`, type: 'symbol', source: dir, minzoom: 12.5, layout: { 'symbol-placement': 'line', 'symbol-spacing': 90, 'icon-image': 'arrow', 'icon-size': ['interpolate', ['linear'], ['zoom'], 12, 0.32, 17, 0.6], 'icon-allow-overlap': true, 'icon-ignore-placement': true } }, before);
   }
 
   // Viaje planificado: caminata punteada, colectivo con el color de su línea
+  map.addLayer({ id: 'trip-glow', type: 'line', source: 'trip', filter: ['==', ['get', 'kind'], 'bus'], layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': ['get', 'color'], 'line-width': gwidth, 'line-blur': 8, 'line-opacity': dark ? 0.4 : 0.3 } }, before);
   map.addLayer({ id: 'trip-case', type: 'line', source: 'trip', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': casing, 'line-width': ['interpolate', ['exponential', 1.4], ['zoom'], 10, 5, 14, 9, 18, 16], 'line-opacity': ['match', ['get', 'kind'], 'bus', 0.95, 0] } }, before);
   map.addLayer({ id: 'trip-bus', type: 'line', source: 'trip', filter: ['==', ['get', 'kind'], 'bus'], layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': ['get', 'color'], 'line-width': ['interpolate', ['exponential', 1.4], ['zoom'], 10, 3, 14, 5.5, 18, 10] } }, before);
   map.addLayer({ id: 'trip-walk', type: 'line', source: 'trip', filter: ['==', ['get', 'kind'], 'walk'], layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': dark ? '#7db9ff' : '#0a6cff', 'line-width': ['interpolate', ['linear'], ['zoom'], 12, 2.5, 17, 5], 'line-dasharray': [0.1, 2] } }, before);
@@ -204,9 +212,9 @@ function installOverlays() {
   });
   map.addLayer({ id: 'stops-sel', type: 'circle', source: 'stops', filter: ['==', ['get', 'id'], parada?.id ?? ''], paint: { 'circle-radius': 9, 'circle-color': c, 'circle-stroke-color': '#fff', 'circle-stroke-width': 3 } });
   map.addLayer({
-    id: 'stops-label', type: 'symbol', source: 'stops', minzoom: 15.6,
-    layout: { 'text-field': ['get', 'nombre'], 'text-font': ['Noto Sans Regular'], 'text-size': 11, 'text-offset': [0, 1.1], 'text-anchor': 'top', 'text-max-width': 9 },
-    paint: { 'text-color': dark ? '#e8e9ee' : '#2c2c30', 'text-halo-color': dark ? '#1b1c20' : '#ffffff', 'text-halo-width': 1.6 },
+    id: 'stops-label', type: 'symbol', source: 'stops', minzoom: 15.2,
+    layout: { 'text-field': ['get', 'nombre'], 'text-font': ['Noto Sans Bold'], 'text-size': ['interpolate', ['linear'], ['zoom'], 15, 10, 18, 12.5], 'text-offset': [0, 1.15], 'text-anchor': 'top', 'text-max-width': 8, 'text-optional': true },
+    paint: { 'text-color': dark ? '#f0f1f5' : '#25252a', 'text-halo-color': dark ? '#1b1c20' : '#ffffff', 'text-halo-width': 2, 'text-halo-blur': 0.4 },
   });
   map.addLayer({ id: 'trip-pts', type: 'circle', source: 'trip-pts', paint: { 'circle-radius': ['interpolate', ['linear'], ['zoom'], 12, 4, 17, 8], 'circle-color': dark ? '#1c1c1f' : '#ffffff', 'circle-stroke-color': ['get', 'color'], 'circle-stroke-width': 3 } });
 
@@ -231,7 +239,7 @@ map.on('zoomend', () => { if (busList.length) paintBuses(); });
 function applyDirection() {
   for (const d of ['ida', 'vuelta'] as const) {
     const on = direccion === 'ambas' || direccion === d;
-    for (const k of ['case', 'line', 'arrows']) if (map.getLayer(`${d}-${k}`)) map.setLayoutProperty(`${d}-${k}`, 'visibility', on ? 'visible' : 'none');
+    for (const k of ['glow', 'case', 'line', 'arrows']) if (map.getLayer(`${d}-${k}`)) map.setLayoutProperty(`${d}-${k}`, 'visibility', on ? 'visible' : 'none');
   }
 }
 
@@ -241,7 +249,7 @@ function refreshSources() {
   (map.getSource('stops') as GeoJSONSource | undefined)?.setData(stopsFC());
   if (map.getLayer('stops-sel')) map.setFilter('stops-sel', ['==', ['get', 'id'], parada?.id ?? '']);
   const c = accent();
-  for (const d of ['ida', 'vuelta']) if (map.getLayer(`${d}-line`)) map.setPaintProperty(`${d}-line`, 'line-color', c);
+  for (const d of ['ida', 'vuelta']) for (const k of ['line', 'glow']) if (map.getLayer(`${d}-${k}`)) map.setPaintProperty(`${d}-${k}`, 'line-color', c);
   if (map.getLayer('stops')) map.setPaintProperty('stops', 'circle-stroke-color', c);
   if (map.getLayer('stops-sel')) map.setPaintProperty('stops-sel', 'circle-color', c);
 }
@@ -961,7 +969,7 @@ function renderViaje(soft = false) {
 
 /* ---------------- Colectivos (3D + etiqueta) ---------------- */
 function paintBuses() {
-  busFC = { type: 'FeatureCollection', features: busFeatures(busList, map.getZoom()) };
+  busFC = { type: 'FeatureCollection', features: busFeatures(busList, map.getZoom(), theme === 'dark' ? '#0b0b0d' : '#8b8b93') };
   (map.getSource('buses3d') as GeoJSONSource | undefined)?.setData(busFC);
 }
 function syncBusMarkers() {
