@@ -12,8 +12,6 @@ import {
 import { buscarLugares, type Lugar } from './geo';
 import { planificar, type Ruta } from './trip';
 import { estimate, dedupe, headingNear, busFeatures, dist, type Est } from './bus3d';
-import { renderRutinas, iniciarUbicacionPeriodica } from './rutinas';
-import { registrarSW } from './push';
 
 /* ------------------------------------------------------------------ utilidades */
 const $ = <T extends HTMLElement>(s: string) => document.querySelector(s) as T;
@@ -46,7 +44,13 @@ const ICON = {
 /* ------------------------------------------------------------------ estado */
 let theme: Theme =
   (localStorage.getItem('viajo-theme') as Theme | null) ?? (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
-let threeD = localStorage.getItem('viajo-3d') !== '0';
+/** Equipos modestos / ahorro de datos / movimiento reducido: arranca en 2D (el usuario puede cambiarlo y se recuerda). */
+const equipoLento = () => {
+  const n = navigator as Navigator & { deviceMemory?: number; connection?: { saveData?: boolean } };
+  return (n.hardwareConcurrency ?? 8) <= 4 || (n.deviceMemory ?? 8) <= 2 || !!n.connection?.saveData || matchMedia('(prefers-reduced-motion: reduce)').matches;
+};
+const prefer3d = localStorage.getItem('viajo-3d');
+let threeD = prefer3d === null ? !equipoLento() : prefer3d !== '0';
 let index: LineaIdx[] = [];
 let linea: Linea | null = null;
 let direccion: 'ida' | 'vuelta' | 'ambas' = 'ambas';
@@ -74,6 +78,7 @@ const busMarkers = new Map<string, maplibregl.Marker>();
 let liveTimer = 0;
 let stopTimer = 0;
 let planAbort: AbortController | null = null;
+let liveAbort: AbortController | null = null;
 
 document.documentElement.dataset.theme = theme;
 
@@ -338,7 +343,8 @@ function renderHome() {
   head.querySelectorAll<HTMLButtonElement>('[data-t]').forEach((b) => (b.onclick = () => { tab = b.dataset.t as typeof tab; sug = null; renderHome(); }));
   if (tab === 'viaje') { bindPlanner(); drawTripContent(); }
   else if (tab === 'rutinas') {
-    renderRutinas({ content, isMobile, setFull: () => setSnap('full'), esc });
+    const ctx = { content, isMobile, setFull: () => setSnap('full'), esc };
+    import('./rutinas').then((m) => { if (tab === 'rutinas' && !linea && !viaje) m.renderRutinas(ctx); });
   } else {
     const q = $<HTMLInputElement>('#q');
     q.oninput = () => { filtro = q.value; drawRows(); };
@@ -996,18 +1002,30 @@ function stopCard(): string {
     <button class="iconbtn" id="close-stop" aria-label="Cerrar parada">${ICON.close}</button></div>${body}</div>`;
 }
 
+/** Sólo repinta la tarjeta de la parada (se refresca cada 30 s) sin reconstruir las ~190 filas de paradas. */
+function drawStopCard() {
+  const host = document.getElementById('stopcard');
+  if (!linea || !host || !content.querySelector('.stop')) return drawBody();
+  host.innerHTML = stopCard();
+  host.querySelectorAll<HTMLElement>('[data-f]').forEach((b) => (b.onclick = () => openLinea(b.dataset.f!)));
+  document.getElementById('close-stop')?.addEventListener('click', clearStop);
+}
+
 function drawBody() {
   if (!linea) return;
   const c = lineColor(linea.codigo, theme);
   const list = linea.stops.map((p) => `<button class="stop ${parada?.id === p.id ? 'sel' : ''}" data-s="${p.id}" style="--c:${c}"><span class="pin"></span><span><div class="n">${esc(p.nombre)}</div>${p.desc ? `<div class="d">${esc(p.desc)}</div>` : ''}</span></button>`).join('');
-  content.innerHTML = `${stopCard()}<div class="sec">Paradas</div>${list}`;
+  content.innerHTML = `<div id="stopcard">${stopCard()}</div><div class="sec">Paradas</div>${list}`;
   content.querySelectorAll<HTMLButtonElement>('.stop').forEach((b) => (b.onclick = () => { const p = linea!.stops.find((s) => s.id === b.dataset.s); if (p) selectStop(p, true); }));
   content.querySelectorAll<HTMLElement>('[data-f]').forEach((b) => (b.onclick = () => openLinea(b.dataset.f!)));
   document.getElementById('close-stop')?.addEventListener('click', clearStop);
 }
 
+let openSeq = 0;
 async function openLinea(file: string, stopId?: string) {
+  const seq = ++openSeq;
   const l = await loadLinea(file);
+  if (seq !== openSeq) return; // se pidió otra línea mientras cargaba
   linea = l; parada = null; paradaData = null; direccion = 'ambas';
   stopLive(); clearBuses(); clearTripMap(); oMarker?.remove(); dMarker?.remove();
   liveState = { n: 0, eta: 0, checked: false, when: 0 };
@@ -1039,7 +1057,7 @@ function selectStop(p: Parada, fly: boolean) {
   const load = async () => {
     if (!parada || parada.id !== p.id) return;
     try { paradaData = await arribos(p.id); paradaError = false; } catch { paradaError = true; }
-    if (parada?.id === p.id) { const st = content.scrollTop; drawBody(); content.scrollTop = st; }
+    if (parada?.id === p.id) drawStopCard();
   };
   load();
   clearInterval(stopTimer);
@@ -1078,8 +1096,10 @@ async function pollLive() {
   const l = linea;
   if (!l || document.hidden) return;
   const routes = [l.ida.flat(), l.vuelta.flat()] as LL[][];
-  const res = await Promise.allSettled(sampleStops(l.stops).map((s) => arribos(s.id, l.nombre).then((r) => ({ s, r }))));
-  if (linea !== l) return; // cambió de línea mientras esperábamos
+  liveAbort?.abort(); liveAbort = new AbortController();
+  const sig = liveAbort.signal;
+  const res = await Promise.allSettled(sampleStops(l.stops).map((s) => arribos(s.id, l.nombre, sig).then((r) => ({ s, r }))));
+  if (linea !== l || sig.aborted) return; // cambió de línea mientras esperábamos
   let eta = 0;
   const real: Est[] = [], est: (Est & { anchor: Anchor })[] = [];
   const t0 = Date.now();
@@ -1109,11 +1129,13 @@ async function pollLive() {
   drawLive();
 }
 function startLive() { stopLive(); pollLive(); liveTimer = window.setInterval(pollLive, 20000); }
-function stopLive() { clearInterval(liveTimer); }
+function stopLive() { clearInterval(liveTimer); liveAbort?.abort(); liveAbort = null; }
 document.addEventListener('visibilitychange', () => { if (!document.hidden && linea) pollLive(); });
 
 /** Cada segundo avanza los colectivos estimados según el tiempo que pasó desde la última consulta. */
-setInterval(() => {
+let tickRaf = 0;
+function tick() {
+  tickRaf = 0;
   if (document.hidden) return;
   if (linea && liveState.checked) drawLive();
   if (!busList.some((b) => b.anchor)) return;
@@ -1124,7 +1146,9 @@ setInterval(() => {
     return e ? { ...b, lng: e.lng, lat: e.lat, heading: e.heading } : b;
   });
   paintBuses(); syncBusMarkers();
-}, 1000);
+}
+// El timer sigue siendo de 1 s, pero el trabajo se agenda en un frame (y se omite con la pestaña oculta).
+setInterval(() => { if (!document.hidden && !tickRaf) tickRaf = requestAnimationFrame(tick); }, 1000);
 
 /* ------------------------------------------------------------------ arranque */
 (async () => {
@@ -1132,8 +1156,12 @@ setInterval(() => {
   setSnap('half');
   if (location.hash === '#rutinas') tab = 'rutinas'; // viene de tocar una notificación
   renderHome();
-  registrarSW();
-  iniciarUbicacionPeriodica();
+  // Avisos/Push no son necesarios para el primer render: se cargan cuando el navegador queda libre.
+  const idle = (window as unknown as { requestIdleCallback?: (f: () => void) => void }).requestIdleCallback ?? ((f: () => void) => setTimeout(f, 1500));
+  idle(() => {
+    import('./push').then((m) => m.registrarSW());
+    import('./rutinas').then((m) => m.iniciarUbicacionPeriodica());
+  });
   const m = location.hash.match(/linea=([\w-]+)/);
   if (m && index.some((i) => i.file === m[1])) openLinea(m[1]);
 })();
