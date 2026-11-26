@@ -13,6 +13,7 @@ interface Env {
   VAPID_SUBJECT: string;
   ALLOWED_ORIGINS: string;
   DEBUG?: string;
+  DEBUG_TOKEN?: string;
 }
 
 interface Dia {
@@ -29,17 +30,46 @@ interface Sub {
   rutinas: Rutina[];
   loc?: { lng: number; lat: number; ts: number };
   estado: Record<string, Dia>;
+  act?: number; // ultima actividad (retencion)
+  testTs?: number; // ultimo /test (enfriamiento)
 }
 interface Evento { sub: string; rutina: string; aviso: Aviso; titulo: string; cuerpo: string; enviado: boolean; detalle?: string }
 
 const MAX_RUTINAS = 10;
 const MAX_SUBS = 200;
-const MAX_BODY = 64 * 1024;
+const MAX_BODY = 32 * 1024;
+const RETENCION_MS = 45 * 24 * 3600_000; // una suscripción sin actividad en 45 días se borra
+const RETENCION_S = 45 * 24 * 3600;
+const LOC_TTL_MS = 3 * 3600_000; // la ubicación se usa si tiene < 3 h
+const LOC_BORRAR_MS = 6 * 3600_000; // pasadas 6 h se borra
+const TEST_ESPERA_MS = 60_000;
 const PUSH_HOSTS = ['googleapis.com', 'mozilla.com', 'push.apple.com', 'windows.com'];
 
 /* ---------------- utilidades ---------------- */
+const SEGURIDAD: Record<string, string> = {
+  'x-content-type-options': 'nosniff',
+  'cache-control': 'no-store',
+  'referrer-policy': 'no-referrer',
+  'content-security-policy': "default-src 'none'; frame-ancestors 'none'",
+  'cross-origin-resource-policy': 'cross-origin',
+};
 const json = (data: unknown, status = 200, cors: Record<string, string> = {}) =>
-  new Response(JSON.stringify(data), { status, headers: { 'content-type': 'application/json', ...cors } });
+  new Response(JSON.stringify(data), { status, headers: { 'content-type': 'application/json', ...SEGURIDAD, ...cors } });
+
+/** Límite por IP en memoria del isolate (best effort: no cuesta escrituras de KV; frena ráfagas desde una misma IP). */
+const golpes = new Map<string, { n: number; hasta: number }>();
+function limitar(req: Request, ruta: string, max: number, ventanaMs: number): boolean {
+  const ip = req.headers.get('cf-connecting-ip') ?? 'x';
+  const k = `${ruta}|${ip}`, now = Date.now();
+  const g = golpes.get(k);
+  if (!g || g.hasta < now) {
+    if (golpes.size > 5000) for (const [kk, v] of golpes) if (v.hasta < now) golpes.delete(kk);
+    golpes.set(k, { n: 1, hasta: now + ventanaMs });
+    return true;
+  }
+  return ++g.n <= max;
+}
+const LIMITES: Record<string, [number, number]> = { '/sync': [20, 3600_000], '/loc': [30, 3600_000], '/test': [6, 3600_000], '/unsubscribe': [20, 3600_000] };
 
 function corsHeaders(req: Request, env: Env): Record<string, string> {
   const origin = req.headers.get('origin') ?? '';
@@ -90,7 +120,7 @@ const leerSub = async (env: Env, id: string): Promise<Sub | null> => {
   const raw = await env.DB.get(`s:${id}`);
   return raw ? (JSON.parse(raw) as Sub) : null;
 };
-const guardarSub = (env: Env, s: Sub) => env.DB.put(`s:${s.id}`, JSON.stringify(s));
+const guardarSub = (env: Env, s: Sub) => env.DB.put(`s:${s.id}`, JSON.stringify({ ...s, act: s.act ?? Date.now() }), { expirationTtl: RETENCION_S });
 const leerIdx = async (env: Env): Promise<string[]> => JSON.parse((await env.DB.get('idx')) ?? '[]');
 
 async function borrarSub(env: Env, id: string) {
@@ -100,45 +130,63 @@ async function borrarSub(env: Env, id: string) {
 }
 
 /* ---------------- API ---------------- */
-async function manejar(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+async function manejar(req: Request, env: Env): Promise<Response> {
   const cors = corsHeaders(req, env);
   const url = new URL(req.url);
   if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
   if (url.pathname === '/' || url.pathname === '/health') return json({ ok: true, servicio: 'viajo-push' }, 200, cors);
   if (url.pathname === '/vapid') return json({ publicKey: env.VAPID_PUBLIC_KEY }, 200, cors);
 
-  if (url.pathname === '/debug/tick' && env.DEBUG === '1') {
+  if (url.pathname === '/debug/tick' && env.DEBUG === '1' && env.DEBUG_TOKEN && req.headers.get('authorization') === `Bearer ${env.DEBUG_TOKEN}`) {
     const now = url.searchParams.get('now') ? new Date(url.searchParams.get('now')!).getTime() : Date.now();
     return json(await tick(env, now, url.searchParams.get('dry') !== '0'), 200, cors);
   }
 
   if (req.method !== 'POST') return json({ error: 'no encontrado' }, 404, cors);
-  const origin = req.headers.get('origin');
-  if (origin && !cors['access-control-allow-origin']) return json({ error: 'origen no permitido' }, 403, cors);
-  const len = Number(req.headers.get('content-length') ?? 0);
-  if (len > MAX_BODY) return json({ error: 'cuerpo demasiado grande' }, 413, cors);
+  if (!cors['access-control-allow-origin']) return json({ error: 'origen no permitido' }, 403, cors);
+  const lim = LIMITES[url.pathname];
+  if (!lim) return json({ error: 'no encontrado' }, 404, cors);
+  if (!limitar(req, url.pathname, lim[0], lim[1])) return json({ error: 'demasiadas solicitudes: probá más tarde' }, 429, { ...cors, 'retry-after': '3600' });
+  if (!(req.headers.get('content-type') ?? '').toLowerCase().startsWith('application/json')) return json({ error: 'se espera application/json' }, 415, cors);
+  if (Number(req.headers.get('content-length') ?? 0) > MAX_BODY) return json({ error: 'cuerpo demasiado grande' }, 413, cors);
   let body: Record<string, unknown>;
-  try { body = (await req.json()) as Record<string, unknown>; } catch { return json({ error: 'JSON inválido' }, 400, cors); }
+  try {
+    const txt = await req.text();
+    if (txt.length > MAX_BODY) return json({ error: 'cuerpo demasiado grande' }, 413, cors);
+    const b = JSON.parse(txt);
+    if (!b || typeof b !== 'object' || Array.isArray(b)) throw new Error('forma');
+    body = b as Record<string, unknown>;
+  } catch { return json({ error: 'JSON inválido' }, 400, cors); }
 
   if (url.pathname === '/sync') {
     const s = (body.subscription ?? {}) as { endpoint?: string; keys?: { p256dh?: string; auth?: string } };
     if (!s.endpoint || !endpointValido(s.endpoint) || !s.keys?.p256dh || !s.keys?.auth) return json({ error: 'suscripción inválida' }, 400, cors);
+    if (s.endpoint.length > 600 || s.keys.p256dh.length > 200 || s.keys.auth.length > 100) return json({ error: 'suscripción inválida' }, 400, cors);
     const id = await idDe(s.endpoint);
-    const idx = await leerIdx(env);
-    if (!idx.includes(id)) {
-      if (idx.length >= MAX_SUBS) return json({ error: 'servicio lleno' }, 503, cors);
-      idx.push(id);
-      await env.DB.put('idx', JSON.stringify(idx));
-    }
     const previo = await leerSub(env, id);
     const rutinas = limpiarRutinas(body.rutinas);
+    if (!previo) {
+      // Suscripción nueva: se comprueba que el endpoint sea real mandándole un aviso de bienvenida
+      // (evita llenar el servicio con endpoints inventados).
+      const candidata: Sub = { id, sub: { endpoint: s.endpoint, expirationTime: null, keys: { p256dh: s.keys.p256dh, auth: s.keys.auth } }, usuario: '', rutinas: [], estado: {} };
+      const r = await enviar(env, candidata, { titulo: 'Viajo', cuerpo: 'Notificaciones activadas en este dispositivo.', tag: 'alta' });
+      if (r !== 'ok') return json({ error: 'el servicio de notificaciones del navegador rechazó la suscripción' }, 400, cors);
+      const idx = await leerIdx(env);
+      if (!idx.includes(id)) {
+        if (idx.length >= MAX_SUBS) return json({ error: 'servicio lleno' }, 503, cors);
+        idx.push(id);
+        await env.DB.put('idx', JSON.stringify(idx));
+      }
+    }
     const estado: Sub['estado'] = {};
     for (const r of rutinas) if (previo?.estado[r.id]) estado[r.id] = previo.estado[r.id]; // conserva lo ya calculado hoy
-    const loc = lugar(body.loc);
+    const quiereLoc = rutinas.some((r) => r.usarUbicacion);
+    const loc = quiereLoc ? lugar(body.loc) : null;
     const sub: Sub = {
       id, sub: { endpoint: s.endpoint, expirationTime: null, keys: { p256dh: s.keys.p256dh, auth: s.keys.auth } },
       usuario: str(body.usuario, 40), rutinas, estado,
-      loc: loc ? { lng: loc.lng, lat: loc.lat, ts: Date.now() } : previo?.loc,
+      loc: loc ? { lng: loc.lng, lat: loc.lat, ts: Date.now() } : quiereLoc ? previo?.loc : undefined,
+      act: Date.now(), testTs: previo?.testTs,
     };
     await guardarSub(env, sub);
     return json({ ok: true, rutinas: rutinas.length }, 200, cors);
@@ -153,7 +201,10 @@ async function manejar(req: Request, env: Env, ctx: ExecutionContext): Promise<R
   if (url.pathname === '/loc') {
     const l = lugar(body);
     if (!l) return json({ error: 'ubicación inválida' }, 400, cors);
+    if (!sub.rutinas.some((r) => r.usarUbicacion)) return json({ ok: true, guardada: false }, 200, cors);
+    if (sub.loc && Date.now() - sub.loc.ts < 120_000) return json({ ok: true }, 200, cors); // evita escrituras de más
     sub.loc = { lng: l.lng, lat: l.lat, ts: Date.now() };
+    sub.act = Date.now();
     await guardarSub(env, sub);
     return json({ ok: true }, 200, cors);
   }
@@ -162,9 +213,12 @@ async function manejar(req: Request, env: Env, ctx: ExecutionContext): Promise<R
     return json({ ok: true }, 200, cors);
   }
   if (url.pathname === '/test') {
+    if (sub.testTs && Date.now() - sub.testTs < TEST_ESPERA_MS) return json({ error: 'esperá un minuto entre pruebas' }, 429, cors);
+    sub.testTs = Date.now();
+    await guardarSub(env, sub);
     const r = await enviar(env, sub, { titulo: 'Viajo · prueba', cuerpo: `${sub.usuario ? sub.usuario + ', ' : ''}las notificaciones de tus rutinas están funcionando.`, tag: 'test' });
     if (r === 'gone') await borrarSub(env, id);
-    return json({ ok: r === 'ok', resultado: r }, r === 'ok' ? 200 : 502, cors);
+    return json({ ok: r === 'ok' }, r === 'ok' ? 200 : 502, cors);
   }
   return json({ error: 'no encontrado' }, 404, cors);
 }
@@ -202,7 +256,7 @@ async function etaEnVivo(paradaId: string | null, lineaNombre: string): Promise<
 
 /** Calcula la recomendación del día desde el origen (la ubicación reciente de la app, o el origen fijo). */
 async function calcular(sub: Sub, r: Rutina, llegadaMs: number, now: number): Promise<Reco | null> {
-  const reciente = sub.loc && now - sub.loc.ts < 3 * 3600_000;
+  const reciente = sub.loc && now - sub.loc.ts < LOC_TTL_MS;
   const o = r.usarUbicacion && reciente ? sub.loc! : r.origen;
   const rutas = await planificar({ lng: o.lng, lat: o.lat }, { lng: r.destino.lng, lat: r.destino.lat }, undefined, 10);
   return recomendar(rutas, llegadaMs, r.margen);
@@ -215,10 +269,14 @@ async function calcular(sub: Sub, r: Rutina, llegadaMs: number, now: number): Pr
 export async function tick(env: Env, now: number, dry: boolean): Promise<Evento[]> {
   const eventos: Evento[] = [];
   const hoy = rosario(now);
+  const huerfanos: string[] = [];
   for (const id of await leerIdx(env)) {
     const sub = await leerSub(env, id);
-    if (!sub) continue;
+    if (!sub) { huerfanos.push(id); continue; } // expiró por retención
+    if (sub.act && now - sub.act > RETENCION_MS) { await borrarSub(env, id); continue; }
     let cambiado = false;
+    // la ubicación vieja no se conserva
+    if (sub.loc && now - sub.loc.ts > LOC_BORRAR_MS) { delete sub.loc; cambiado = true; }
     for (const r of sub.rutinas) {
       if (!r.activa || !r.dias.length) continue;
       // hoy y mañana: una llegada a las 00:30 se avisa desde las 22:30 del día anterior
@@ -266,11 +324,18 @@ export async function tick(env: Env, now: number, dry: boolean): Promise<Evento[
     for (const [k, v] of Object.entries(sub.estado)) if (v.llegadaMs < now - 24 * 3600_000) { delete sub.estado[k]; cambiado = true; }
     if (cambiado) await guardarSub(env, sub);
   }
+  if (huerfanos.length) {
+    const resto = (await leerIdx(env)).filter((x) => !huerfanos.includes(x));
+    await env.DB.put('idx', JSON.stringify(resto));
+  }
   return eventos;
 }
 
 export default {
-  fetch: (req: Request, env: Env, ctx: ExecutionContext) => manejar(req, env, ctx),
+  fetch: async (req: Request, env: Env) => {
+    try { return await manejar(req, env); }
+    catch (e) { console.error('error', (e as Error).message); return json({ error: 'error interno' }, 500); }
+  },
   scheduled: (_e: ScheduledController, env: Env, ctx: ExecutionContext) => { ctx.waitUntil(tick(env, Date.now(), false)); },
 };
 
