@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "data": "node scripts/fetch-data.mjs"
+    "data": "node scripts/fetch-data.mjs && node scripts/build-paradas.mjs"
   },
   "devDependencies": {
     "@types/geojson": "^7946.0.16",
