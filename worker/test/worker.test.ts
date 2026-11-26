@@ -12,14 +12,24 @@ let env: ReturnType<typeof mkEnv>;
 let mundo: Mundo;
 beforeEach(() => { env = mkEnv(); mundo = instalarMundo(); pushPayloads.length = 0; });
 
+// Cada petición simula una IP distinta (el worker limita /sync, /loc, /test y /unsubscribe por IP).
+let ipN = 0;
 const call = (path: string, body: unknown, init: { origin?: string | null; method?: string; raw?: string; headers?: Record<string, string> } = {}) => {
-  const headers: Record<string, string> = { 'content-type': 'application/json', ...init.headers };
+  const headers: Record<string, string> = { 'content-type': 'application/json', 'cf-connecting-ip': `10.1.${Math.floor(ipN / 250)}.${ipN++ % 250}`, ...init.headers };
   if (init.origin !== null) headers.origin = init.origin ?? ORIGIN;
   const m = init.method ?? 'POST';
   return worker.fetch(new Request('https://w.test' + path, { method: m, headers, body: m === 'GET' || m === 'OPTIONS' ? undefined : (init.raw ?? JSON.stringify(body)) }), env, {} as ExecutionContext);
 };
-const sync = (endpoint: unknown, rutinas: unknown[], extra: Record<string, unknown> = {}) =>
-  call('/sync', { subscription: { endpoint, keys: { p256dh: 'k', auth: 'a' } }, rutinas, usuario: 'Ana', ...extra });
+/** /sync de una suscripción NUEVA manda un aviso de bienvenida (verifica que el endpoint sea real): acá se descarta para no ensuciar los conteos. */
+const sync = async (endpoint: unknown, rutinas: unknown[], extra: Record<string, unknown> = {}) => {
+  const antes = mundo.push.calls.length, antesP = pushPayloads.length;
+  const r = await call('/sync', { subscription: { endpoint, keys: { p256dh: 'k', auth: 'a' } }, rutinas, usuario: 'Ana', ...extra });
+  if (mundo.push.calls.length === antes + 1 && pushPayloads[antesP]?.data.tag === 'alta') {
+    mundo.push.calls.pop(); pushPayloads.splice(antesP, 1);
+    mundo.push.porUrl[endpoint as string]--;
+  }
+  return r;
+};
 const sha = async (s: string) => [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s)))].slice(0, 16).map((b) => b.toString(16).padStart(2, '0')).join('');
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const leer = async (ep: string): Promise<any> => JSON.parse(env.DB.m.get(`s:${await sha(ep)}`) ?? 'null');
