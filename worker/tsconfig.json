@@ -9,5 +9,5 @@
     "noEmit": true,
     "types": ["@cloudflare/workers-types"]
   },
-  "include": ["src", "../src/recomendar.ts", "../src/trip.ts"]
+  "include": ["src", "test", "vitest.config.ts", "../src/recomendar.ts", "../src/trip.ts"]
 }

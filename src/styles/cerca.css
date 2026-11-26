@@ -1,0 +1,59 @@
+/* "Cerca de vos" + favoritas. Usa las variables del tema (--fg, --fg2, --chip, --solid, --accent...). */
+.cerca .sr, .cerca-det .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.cerca { margin: 6px 4px 8px; }
+.cerca-h { display: flex; align-items: center; justify-content: space-between; padding: 10px 8px 4px; }
+.cerca-h h2 { margin: 0; font-size: 12px; font-weight: 650; color: var(--fg2); text-transform: uppercase; letter-spacing: 0.06em; }
+.cerca-msg { background: var(--chip); border-radius: 16px; padding: 14px; font-size: 13.5px; color: var(--fg2); line-height: 1.4; text-align: center; }
+.cerca-msg.small { font-size: 12.5px; padding: 10px 14px; }
+.cerca-msg .spin { margin: 0 auto 8px; }
+
+.cerca-btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 9px 14px; border-radius: 12px; background: var(--solid); color: var(--fg); font-weight: 600; font-size: 13.5px; box-shadow: 0 0 0 0.5px var(--sep); }
+.cerca-btn:active { opacity: 0.75; }
+.cerca-btn.primary { background: var(--accent); color: #fff; box-shadow: none; }
+.cerca-msg .cerca-btn { display: flex; margin: 10px auto 0; }
+.linkbtn { color: var(--accent); font-weight: 600; font-size: 12.5px; padding: 6px 2px; }
+
+.cerca-row { position: relative; display: flex; align-items: stretch; border-radius: 14px; }
+.cerca-row:hover { background: var(--chip); }
+.cerca-row.first { background: var(--chip); }
+.cerca-main { flex: 1; min-width: 0; display: flex; gap: 12px; align-items: flex-start; text-align: left; padding: 10px 6px 10px 10px; border-radius: 14px; }
+.cerca-dist { flex: none; width: 54px; display: flex; flex-direction: column; align-items: flex-start; gap: 2px; }
+.cerca-dist b { font-size: 15px; letter-spacing: -0.01em; font-variant-numeric: tabular-nums; }
+.cerca-dist small { display: inline-flex; align-items: center; gap: 3px; font-size: 11.5px; color: var(--fg2); white-space: nowrap; }
+.cerca-txt { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.cerca-txt .n { font-size: 14.5px; font-weight: 600; line-height: 1.25; }
+.cerca-txt .d { font-size: 12px; color: var(--fg2); }
+.cerca-txt .bs { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; }
+.cerca-txt .mas { font-size: 12px; font-weight: 650; color: var(--fg2); align-self: center; padding-left: 2px; }
+.cerca-row > .fav-star { align-self: center; margin-right: 4px; }
+
+.cerca-arr { background: var(--chip); border-radius: 0 0 14px 14px; margin: -6px 0 6px; padding: 8px 12px 6px; }
+.cerca-arr-h { font-size: 11.5px; font-weight: 650; color: var(--fg2); text-transform: uppercase; letter-spacing: 0.04em; padding-bottom: 2px; }
+.cerca-arr .stale { text-transform: none; letter-spacing: 0; font-weight: 500; }
+.cerca-arr .arr:first-of-type { border-top: 0; }
+.cerca-row.first + .cerca-arr { margin-top: 0; }
+
+.favs .cerca-row + .cerca-row { margin-top: 2px; }
+.fav-arrs { display: flex; flex-wrap: wrap; gap: 6px 10px; margin-top: 5px; }
+.fav-arr { display: inline-flex; align-items: center; gap: 5px; }
+.fav-arr .pill { background: var(--chip); }
+.fav-note { font-size: 12px; color: var(--fg2); }
+
+/* Estrella */
+.fav-star { flex: none; width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center; color: var(--fg2); }
+.fav-star svg { fill: none; stroke: currentColor; }
+.fav-star:hover { background: var(--chip-hover); }
+.fav-star[aria-pressed='true'] { color: #ffb020; }
+.fav-star[aria-pressed='true'] svg { fill: currentColor; }
+.fav-star:focus-visible, .cerca-btn:focus-visible, .cerca-main:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.stop-wrap { position: relative; }
+.stop-wrap > .stop { padding-right: 46px; }
+.stop-wrap > .fav-star { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); width: 34px; height: 34px; }
+.card .top > .fav-star { margin: -4px 0 0; }
+
+/* Detalle */
+.cerca-nav { display: flex; align-items: center; gap: 10px; padding: 8px 4px 0; font-size: 13px; font-weight: 650; color: var(--fg2); text-transform: uppercase; letter-spacing: 0.06em; }
+.cerca-acts { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 6px 0 8px; }
+.cerca-lineas { display: flex; flex-wrap: wrap; gap: 4px; padding: 2px 0 8px; }
+
+.cerca-pin { width: 22px; height: 22px; border-radius: 50%; background: var(--accent); border: 4px solid #fff; box-shadow: 0 0 0 6px color-mix(in srgb, var(--accent) 30%, transparent), 0 3px 10px rgba(0, 0, 0, 0.4); }

@@ -17,21 +17,21 @@ interface Palette {
 const PALETTE: Record<Theme, Palette> = {
   light: {
     land: '#f3f0e9', residential: '#f0ede5', commercial: '#f1eadf', industrial: '#ebe8e2',
-    institution: '#f1ead8', hospital: '#f8e3df', park: '#d3eabd', wood: '#c8e2b0', sand: '#f2e7c6',
-    water: '#a6d1f4', waterLine: '#a6d1f4', building: '#e8e3d9', buildingEdge: '#d8d1c3',
+    institution: '#f1ead8', hospital: '#f8e3df', park: '#d5ebc1', wood: '#c9e3b3', sand: '#f2e7c6',
+    water: '#acd4f3', waterLine: '#9ccaee', building: '#e8e3d9', buildingEdge: '#d8d1c3',
     minor: '#ffffff', minorCase: '#e2ddd1', mid: '#ffffff', midCase: '#d9d2c3',
     primary: '#fff3cf', primaryCase: '#e0cf9c', major: '#fcd47a', majorCase: '#e0a94c',
     path: '#d8cfbd', rail: '#c9c3b6', boundary: '#c3b9d6',
-    text: '#3a3a40', textSoft: '#767680', halo: '#ffffffd9', waterText: '#4a82b8', parkText: '#4d7a3a',
+    text: '#34343a', textSoft: '#6a6a74', halo: '#ffffffe6', waterText: '#3f76ab', parkText: '#46723a',
   },
   dark: {
     land: '#1b1c20', residential: '#1e1f24', commercial: '#212227', industrial: '#202125',
-    institution: '#222327', hospital: '#2a2024', park: '#213227', wood: '#1d2c22', sand: '#2b2820',
-    water: '#16304a', waterLine: '#16304a', building: '#272930', buildingEdge: '#303239',
+    institution: '#222327', hospital: '#2a2024', park: '#223829', wood: '#1d2f24', sand: '#2b2820',
+    water: '#17344f', waterLine: '#1d4163', building: '#272930', buildingEdge: '#303239',
     minor: '#35373e', minorCase: '#18191c', mid: '#3d4048', midCase: '#18191c',
     primary: '#4b4738', primaryCase: '#211f17', major: '#7b6330', majorCase: '#2e2410',
     path: '#3a3c42', rail: '#3a3c42', boundary: '#4a4560',
-    text: '#d6d8de', textSoft: '#8b8e98', halo: '#1b1c20e6', waterText: '#5f93c4', parkText: '#7fae82',
+    text: '#dcdee4', textSoft: '#9ea1ab', halo: '#1b1c20ec', waterText: '#6a9fd0', parkText: '#86b88a',
   },
 };
 
@@ -180,8 +180,20 @@ export function buildStyle(theme: Theme, threeD = true): StyleSpecification {
     layout: { 'text-field': NAME, 'text-font': ['Noto Sans Regular'], 'text-size': 12, 'text-letter-spacing': 0.15, 'text-max-width': 8 },
     paint: { 'text-color': p.waterText, 'text-halo-color': p.halo, 'text-halo-width': 1 },
   });
+  // Jerarquía: avenidas principales se leen antes y más grandes; calles menores sólo con zoom alto
+  const MAJOR = ['motorway', 'trunk', 'primary', 'secondary'];
+  add({
+    id: 'road-label-major', type: 'symbol', source: 'om', 'source-layer': 'transportation_name', minzoom: 12.8,
+    filter: cls(...MAJOR),
+    layout: {
+      'symbol-placement': 'line', 'text-field': NAME, 'text-font': BOLD,
+      'text-size': interp([[13, 10], [18, 14]]), 'text-letter-spacing': 0.03, 'symbol-spacing': 360,
+    },
+    paint: { 'text-color': p.text, 'text-halo-color': p.halo, 'text-halo-width': 2 },
+  });
   add({
     id: 'road-label', type: 'symbol', source: 'om', 'source-layer': 'transportation_name', minzoom: 14.5,
+    filter: ['!', cls(...MAJOR)],
     layout: {
       'symbol-placement': 'line', 'text-field': NAME, 'text-font': REG,
       'text-size': interp([[14, 10], [18, 13]]), 'text-letter-spacing': 0.02, 'symbol-spacing': 320,

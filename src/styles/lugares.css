@@ -1,0 +1,42 @@
+/* Lugares guardados: chips y diálogo */
+.lg-chips { display: flex; gap: 6px; padding: 8px 0 2px; overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+.lg-chips::-webkit-scrollbar { display: none; }
+.lg-chip { flex: none; display: inline-flex; align-items: center; gap: 5px; max-width: 220px; padding: 6px 12px; border-radius: 999px; background: var(--chip); color: var(--fg); font: inherit; font-size: 13px; font-weight: 600; border: 0; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lg-chip:hover { background: var(--chip-hover); }
+.lg-chip:focus-visible, .lg-btn:focus-visible, .lg-ic:focus-visible, .lg-x:focus-visible, .lg-op:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.lg-chip.vacio { background: transparent; border: 1.5px dashed var(--chip-hover); color: var(--fg2); }
+.lg-chip.vacio i { font-style: normal; opacity: 0.7; }
+.lg-chip.guardar { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); }
+.lg-chip.gestion { color: var(--fg2); padding: 6px 11px; }
+
+.lg-dlg { border: 0; padding: 0; border-radius: 22px; width: min(440px, calc(100vw - 24px)); max-height: min(86vh, 640px); background: var(--solid, #fff); color: var(--fg); font-family: var(--font); box-shadow: 0 24px 70px rgba(0, 0, 0, 0.4); overflow: hidden; }
+.lg-dlg::backdrop { background: rgba(0, 0, 0, 0.42); -webkit-backdrop-filter: blur(3px); backdrop-filter: blur(3px); }
+.lg-wrap { display: flex; flex-direction: column; gap: 10px; padding: 16px; max-height: min(86vh, 640px); overflow-y: auto; box-sizing: border-box; }
+.lg-wrap header { display: flex; align-items: center; justify-content: space-between; }
+.lg-wrap h2 { margin: 0; font-size: 19px; font-weight: 700; }
+.lg-x { width: 32px; height: 32px; border-radius: 50%; border: 0; background: var(--chip); color: var(--fg); cursor: pointer; font-size: 13px; }
+.lg-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.lg-item { display: flex; align-items: center; gap: 8px; padding: 8px 4px; border-bottom: 0.5px solid var(--sep); }
+.lg-ico { font-size: 22px; width: 34px; text-align: center; flex: none; }
+.lg-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.lg-main b { font-size: 15px; }
+.lg-main small, .lg-note, .lg-sel, .lg-op small { color: var(--fg2); font-size: 12px; overflow: hidden; text-overflow: ellipsis; }
+.lg-note { margin: 0; }
+.lg-btn { font: inherit; font-size: 14px; font-weight: 600; border: 0; border-radius: 999px; padding: 8px 14px; background: var(--chip); color: var(--fg); cursor: pointer; flex: none; }
+.lg-btn.pri { background: var(--accent); color: #fff; }
+.lg-btn.bad { color: #ff453a; }
+.lg-foot { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; padding-top: 4px; }
+.lg-fld { display: flex; flex-direction: column; gap: 5px; font-size: 13px; font-weight: 600; color: var(--fg2); }
+.lg-fld input, .lg-fld select { font: inherit; font-size: 16px; color: var(--fg); background: var(--chip); border: 0; border-radius: 12px; padding: 10px 12px; outline: 0; }
+.lg-fld input:focus-visible, .lg-fld select:focus-visible { outline: 2px solid var(--accent); }
+.lg-icos { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; }
+.lg-ic { font-size: 20px; padding: 6px 0; border: 2px solid transparent; border-radius: 12px; background: var(--chip); cursor: pointer; }
+.lg-ic[aria-pressed='true'] { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.lg-res { display: flex; flex-direction: column; }
+.lg-op { text-align: left; font: inherit; color: var(--fg); background: none; border: 0; padding: 8px 6px; border-radius: 10px; cursor: pointer; display: flex; flex-direction: column; }
+.lg-op:hover { background: var(--chip); }
+.lg-op b { font-size: 14px; }
+.lg-err { margin: 0; color: #ff453a; font-size: 13px; }
+
+/* chips dentro del formulario de Rutinas */
+.rform .lg-chips { padding: 0 0 6px; }
